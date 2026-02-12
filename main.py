@@ -2,9 +2,9 @@ import sys
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 
-from repository import CodeRepository
-from styles import apply_dark_theme, apply_light_theme
-from ui import MainWindow
+from repository.db_querys import CodeRepository
+from styles.styles import apply_dark_theme, apply_light_theme
+from ui.ui import MainWindow
 
 def run() -> None:
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)

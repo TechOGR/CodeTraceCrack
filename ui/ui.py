@@ -11,9 +11,9 @@ from PyQt5.QtGui import QPixmap, QColor, QPainter, QBrush, QPen, QFont
 from pathlib import Path
 from datetime import datetime
 
-from repository import CodeRepository, STATUS_LABELS, ALL_STATUSES, STATUS_DISPONIBLE
-from ocr import extract_codes_from_image
-from styles import get_status_color, COLORS
+from repository.db_querys import CodeRepository, STATUS_LABELS, ALL_STATUSES, STATUS_DISPONIBLE
+from modules.ocr import extract_codes_from_image
+from styles.styles import get_status_color, COLORS
 
 CODE_REGEX = re.compile(r"^[A-Z]{2,5}\d{3,9}$")
 
@@ -197,8 +197,8 @@ class MainWindow(QMainWindow):
         self._old_pos = None
         
         self.setWindowTitle("📦 CodeTrace - Gestor de Códigos")
-        self.resize(1200, 750)
-        self.setMinimumSize(900, 600)
+        self.resize(1250, 750)
+        self.setMinimumSize(1250, 755)
 
         # Main Layout Container
         self.main_container = QWidget()

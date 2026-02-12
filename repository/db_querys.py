@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from datetime import datetime
 
 DB_NAME = "codes.db"
+FULL_DB_PATH = Path.joinpath(Path.cwd(), "db", DB_NAME)
 
 # Estados posibles para los códigos
 STATUS_DISPONIBLE = "disponible"
@@ -23,7 +24,7 @@ STATUS_LABELS = {
 
 class CodeRepository:
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = Path(db_path) if db_path else Path(DB_NAME)
+        self.db_path = Path(db_path) if db_path else Path(FULL_DB_PATH)
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
         self._init_db()
