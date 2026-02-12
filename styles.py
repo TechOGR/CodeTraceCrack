@@ -41,6 +41,7 @@ COLORS = {
     "status_pedido": "#f59e0b",
     "status_perdido": "#ef4444",
     "status_no_hay_mas": "#6b7280",
+    "status_ultimo": "#3b82f6",
 }
 
 def apply_dark_theme(app: QApplication) -> None:
@@ -62,6 +63,38 @@ def apply_dark_theme(app: QApplication) -> None:
     app.setPalette(palette)
     
     app.setStyleSheet(f"""
+        /* === CUSTOM TITLE BAR === */
+        #TitleBar {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 {COLORS["bg_light"]}, stop:1 {COLORS["bg_card"]});
+            border-bottom: 1px solid {COLORS["border_dark"]};
+        }}
+        
+        #TitleLabel {{
+            color: {COLORS["text_primary"]};
+            font-weight: bold;
+            font-size: 14px;
+        }}
+        
+        #TitleButton {{
+            background: transparent;
+            border: none;
+            border-radius: 0px;
+            color: {COLORS["text_secondary"]};
+            font-size: 16px;
+            min-width: 45px;
+            max-width: 45px;
+        }}
+        
+        #TitleButton:hover {{
+            background: rgba(255, 255, 255, 0.1);
+        }}
+        
+        #CloseButton:hover {{
+            background: {COLORS["error"]};
+            color: white;
+        }}
+
         /* === MAIN WINDOW === */
         QMainWindow {{
             background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -390,6 +423,37 @@ def apply_light_theme(app: QApplication) -> None:
     app.setPalette(palette)
     
     app.setStyleSheet(f"""
+        /* === CUSTOM TITLE BAR === */
+        #TitleBar {{
+            background: #ffffff;
+            border-bottom: 1px solid #e9d5ff;
+        }}
+        
+        #TitleLabel {{
+            color: #1e1b4b;
+            font-weight: bold;
+            font-size: 14px;
+        }}
+        
+        #TitleButton {{
+            background: transparent;
+            border: none;
+            border-radius: 0px;
+            color: #1e1b4b;
+            font-size: 16px;
+            min-width: 45px;
+            max-width: 45px;
+        }}
+        
+        #TitleButton:hover {{
+            background: rgba(0, 0, 0, 0.05);
+        }}
+        
+        #CloseButton:hover {{
+            background: #ef4444;
+            color: white;
+        }}
+
         QWidget {{
             font-family: 'Segoe UI', 'Inter', sans-serif;
             font-size: 13px;
@@ -550,6 +614,7 @@ def get_status_color(status: str) -> str:
     status_colors = {
         "disponible": COLORS["status_disponible"],
         "pedido": COLORS["status_pedido"],
+        "ultimo": COLORS["status_ultimo"],
         "perdido": COLORS["status_perdido"],
         "no_hay_mas": COLORS["status_no_hay_mas"],
     }

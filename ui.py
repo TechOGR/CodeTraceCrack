@@ -1,11 +1,11 @@
 import re
 from typing import List, Optional
-from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, QStringListModel, QTimer
+from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, QStringListModel, QTimer, QPoint
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTableView, QLineEdit,
     QPushButton, QLabel, QCheckBox, QComboBox, QFileDialog, QMessageBox, 
     QSplitter, QDialog, QFormLayout, QCompleter, QListView, QStyledItemDelegate,
-    QFrame, QGridLayout
+    QFrame, QGridLayout, QSizeGrip
 )
 from PyQt5.QtGui import QPixmap, QColor, QPainter, QBrush, QPen, QFont
 from pathlib import Path
@@ -191,15 +191,65 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.repo = repo
         self.theme_change_callback = None
+        
+        # Frameless Window Setup
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint)
+        self._old_pos = None
+        
         self.setWindowTitle("📦 CodeTrace - Gestor de Códigos")
         self.resize(1200, 750)
         self.setMinimumSize(900, 600)
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setSpacing(16)
-        root.setContentsMargins(20, 20, 20, 20)
+        # Main Layout Container
+        self.main_container = QWidget()
+        self.main_container.setObjectName("MainContainer")
+        self.setCentralWidget(self.main_container)
+        
+        root = QVBoxLayout(self.main_container)
+        root.setSpacing(0)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        # === CUSTOM TITLE BAR ===
+        self.title_bar = QWidget()
+        self.title_bar.setObjectName("TitleBar")
+        self.title_bar.setFixedHeight(40)
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(15, 0, 0, 0)
+        title_layout.setSpacing(0)
+        
+        title_icon = QLabel("📦")
+        title_icon.setStyleSheet("font-size: 16px; margin-right: 8px;")
+        self.title_text = QLabel("CodeTrace - Gestor de Códigos")
+        self.title_text.setObjectName("TitleLabel")
+        
+        title_layout.addWidget(title_icon)
+        title_layout.addWidget(self.title_text)
+        title_layout.addStretch()
+        
+        self.btn_min = QPushButton("—")
+        self.btn_max = QPushButton("▢")
+        self.btn_close = QPushButton("✕")
+        
+        for btn in [self.btn_min, self.btn_max, self.btn_close]:
+            btn.setObjectName("TitleButton")
+            btn.setFixedSize(45, 40)
+            btn.setCursor(Qt.PointingHandCursor)
+            title_layout.addWidget(btn)
+        
+        self.btn_close.setObjectName("CloseButton")
+        
+        self.btn_min.clicked.connect(self.showMinimized)
+        self.btn_max.clicked.connect(self._toggle_max_restore)
+        self.btn_close.clicked.connect(self.close)
+        
+        root.addWidget(self.title_bar)
+
+        # === CONTENT AREA ===
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(16)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        root.addWidget(content_widget)
 
         # === HEADER ===
         header = QHBoxLayout()
@@ -218,7 +268,7 @@ class MainWindow(QMainWindow):
         self.theme_toggle.setFixedWidth(130)
         header.addWidget(QLabel("🎨 Tema"))
         header.addWidget(self.theme_toggle)
-        root.addLayout(header)
+        content_layout.addLayout(header)
 
         # === TOOLBAR ===
         toolbar = QHBoxLayout()
@@ -237,7 +287,7 @@ class MainWindow(QMainWindow):
         
         toolbar.addStretch()
         toolbar.addWidget(self.btn_clear)
-        root.addLayout(toolbar)
+        content_layout.addLayout(toolbar)
 
         # === FILTROS ===
         filter_frame = QFrame()
@@ -289,7 +339,7 @@ class MainWindow(QMainWindow):
         self.search.setFixedWidth(280)
         filters.addWidget(self.search)
         
-        root.addWidget(filter_frame)
+        content_layout.addWidget(filter_frame)
 
         # === STATS BAR ===
         self.stats_label = QLabel()
@@ -298,7 +348,7 @@ class MainWindow(QMainWindow):
             font-size: 12px;
             padding: 4px 8px;
         """)
-        root.addWidget(self.stats_label)
+        content_layout.addWidget(self.stats_label)
 
         # === CONTENT ===
         splitter = QSplitter()
@@ -310,6 +360,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
+        self.table.verticalHeader().setVisible(False)
         
         # Delegate para status
         self.status_delegate = StatusBadgeDelegate()
@@ -376,7 +427,11 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.table)
         splitter.addWidget(right_panel)
         splitter.setSizes([850, 350])
-        root.addWidget(splitter)
+        content_layout.addWidget(splitter)
+        
+        # Add SizeGrip for resizing
+        self.sizegrip = QSizeGrip(self)
+        self.sizegrip.setFixedSize(16, 16)
 
         # === CONNECTIONS ===
         self.btn_import_txt.clicked.connect(self.on_import_txt)
@@ -399,6 +454,32 @@ class MainWindow(QMainWindow):
         self._update_column_widths()
         self._update_stats()
         self.theme_toggle.setCurrentText("🌙 Oscuro" if initial_theme == "Oscuro" else "☀️ Claro")
+
+    def _toggle_max_restore(self):
+        if self.isMaximized():
+            self.showNormal()
+            self.btn_max.setText("▢")
+        else:
+            self.showMaximized()
+            self.btn_max.setText("❐")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if self.title_bar.rect().contains(event.pos()):
+                self._old_pos = event.globalPos()
+
+    def mouseMoveEvent(self, event):
+        if self._old_pos is not None:
+            delta = QPoint(event.globalPos() - self._old_pos)
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self._old_pos = event.globalPos()
+
+    def mouseReleaseEvent(self, event):
+        self._old_pos = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.sizegrip.move(self.width() - self.sizegrip.width(), self.height() - self.sizegrip.height())
     
     def _update_column_widths(self):
         self.table.setColumnWidth(0, 50)
