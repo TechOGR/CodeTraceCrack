@@ -1,4 +1,4 @@
-# 📦 CodeTrace - Gestor de Códigos Futurista
+# 📦 CodeTrace - Gestor de Códigos
 
 CodeTrace es una aplicación de escritorio moderna y robusta diseñada para la gestión, seguimiento y extracción de códigos mediante OCR. Con una interfaz inspirada en estéticas futuristas, ofrece una experiencia de usuario fluida y eficiente para el manejo de inventarios de códigos.
 
