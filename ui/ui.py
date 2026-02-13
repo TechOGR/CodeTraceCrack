@@ -1,18 +1,21 @@
 import re
 from typing import List, Optional
-from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, QStringListModel, QTimer, QPoint
+from PyQt5.QtCore import Qt, QSize, QAbstractTableModel, QModelIndex, QVariant, QStringListModel, QTimer, QPoint
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTableView, QLineEdit,
     QPushButton, QLabel, QCheckBox, QComboBox, QFileDialog, QMessageBox, 
     QSplitter, QDialog, QFormLayout, QCompleter, QListView, QStyledItemDelegate,
     QFrame, QGridLayout, QSizeGrip
 )
-from PyQt5.QtGui import QPixmap, QColor, QPainter, QBrush, QPen, QFont
+from PyQt5.QtGui import QPixmap,QIcon, QColor, QPainter, QBrush, QPen, QFont
 from pathlib import Path
 from datetime import datetime
 
-from repository.db_querys import CodeRepository, STATUS_LABELS, ALL_STATUSES, STATUS_DISPONIBLE
+from repository.db_querys import (CodeRepository, STATUS_LABELS, ALL_STATUSES, 
+                                  STATUS_DISPONIBLE, STATUS_PENDIENTE, STATUS_PEDIDO, 
+                                  STATUS_PERDIDO, STATUS_NO_HAY_MAS, STATUS_ULTIMO)
 from modules.ocr import extract_codes_from_image
+from modules.export_utils import export_to_csv
 from styles.styles import get_status_color, COLORS
 
 CODE_REGEX = re.compile(r"^[A-Z]{2,5}\d{3,9}$")
@@ -51,7 +54,7 @@ class AutocompleteSearchEdit(QLineEdit):
     def __init__(self, repo: CodeRepository, parent=None):
         super().__init__(parent)
         self.repo = repo
-        self.setPlaceholderText("🔍 Buscar código... (autocompletado activo)")
+        self.setPlaceholderText("Buscar código... (autocompletado activo)")
         
         # Configurar completer
         self.completer_model = QStringListModel()
@@ -61,10 +64,13 @@ class AutocompleteSearchEdit(QLineEdit):
         self.completer.setCompletionMode(QCompleter.PopupCompletion)
         self.setCompleter(self.completer)
         
-        # Popup personalizado
+        # Popup personalizado con ancho ampliado
         popup = QListView()
         popup.setSpacing(2)
+        popup.setMinimumWidth(350)
+        popup.setMinimumHeight(200)
         self.completer.setPopup(popup)
+        self.completer.setMaxVisibleItems(10)
         
         # Timer para debounce
         self.search_timer = QTimer()
@@ -100,14 +106,76 @@ class AutocompleteSearchEdit(QLineEdit):
         return text.upper()
 
 
+class CodeDialog(QDialog):
+    """Diálogo personalizado con barra de título fina y botón cerrar a la izquierda."""
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setObjectName("CodeDialog")
+        self._old_pos = None
+        
+        # Layout principal
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Barra de título personalizada (fina)
+        self.title_bar = QWidget()
+        self.title_bar.setObjectName("DialogTitleBar")
+        self.title_bar.setFixedHeight(36)
+        
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(8)
+        
+        # Botón cerrar a la izquierda (cuadrado en la esquina)
+        self.btn_close = QPushButton("×")
+        self.btn_close.setObjectName("DialogCloseButton")
+        self.btn_close.setFixedSize(36, 36)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.clicked.connect(self.reject)
+        title_layout.addWidget(self.btn_close)
+        
+        # Título
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("DialogTitleLabel")
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        
+        main_layout.addWidget(self.title_bar)
+        
+        # Contenedor del contenido
+        self.content_widget = QWidget()
+        self.content_widget.setObjectName("DialogContent")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(20, 20, 20, 20)
+        self.content_layout.setSpacing(16)
+        
+        main_layout.addWidget(self.content_widget)
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if self.title_bar.geometry().contains(event.pos()):
+                self._old_pos = event.globalPos()
+    
+    def mouseMoveEvent(self, event):
+        if self._old_pos is not None:
+            delta = QPoint(event.globalPos() - self._old_pos)
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self._old_pos = event.globalPos()
+    
+    def mouseReleaseEvent(self, event):
+        self._old_pos = None
+
+
 class CodesTableModel(QAbstractTableModel):
     def __init__(self, repo: CodeRepository) -> None:
         super().__init__()
         self.repo = repo
         self.rows: List[dict] = []
-        self.headers = ["✓", "Código", "Fecha", "Estado", "Status"]
+        self.headers = ["#", "Código", "Fecha", "Estado"]
         self.annotated_filter: Optional[bool] = None
-        self.duplicates_only: Optional[bool] = None
         self.search_text: Optional[str] = None
         self.status_filter: Optional[str] = None
         self.order_by = "created_at"
@@ -117,7 +185,7 @@ class CodesTableModel(QAbstractTableModel):
         self.beginResetModel()
         data = self.repo.list_codes(
             annotated=self.annotated_filter,
-            duplicates_only=bool(self.duplicates_only),
+            duplicates_only=False,
             search=self.search_text,
             status=self.status_filter,
             order_by=self.order_by,
@@ -138,6 +206,8 @@ class CodesTableModel(QAbstractTableModel):
         row = self.rows[index.row()]
         col = index.column()
         if role == Qt.DisplayRole:
+            if col == 0:
+                return index.row() + 1  # Número de fila (1, 2, 3...)
             if col == 1:
                 return row["code"]
             if col == 2:
@@ -148,37 +218,21 @@ class CodesTableModel(QAbstractTableModel):
                 except:
                     return row["created_at"]
             if col == 3:
-                return "✅ Usado" if row["annotated"] else ""
-            if col == 4:
-                return ""  # El status se muestra con el delegate
-        if role == Qt.UserRole and col == 4:
+                return ""  # El estado se muestra con el delegate
+        if role == Qt.UserRole and col == 3:
             # Retornar el status para el delegate
             return row.get("status", STATUS_DISPONIBLE)
-        if role == Qt.CheckStateRole and col == 0:
-            return Qt.Checked if row["annotated"] else Qt.Unchecked
+        if role == Qt.TextAlignmentRole and col == 0:
+            return Qt.AlignCenter
         if role == Qt.ToolTipRole:
             status = row.get("status", STATUS_DISPONIBLE)
             status_label = STATUS_LABELS.get(status, status)
-            return f"Código: {row['code']}\nStatus: {status_label}\nDuplicado: {'Sí' if row['duplicate'] else 'No'}"
+            return f"Código: {row['code']}\nEstado: {status_label}"
         return QVariant()
-
-    def setData(self, index: QModelIndex, value, role: int = Qt.EditRole):
-        if not index.isValid():
-            return False
-        if index.column() == 0 and role == Qt.CheckStateRole:
-            row = self.rows[index.row()]
-            checked = value == Qt.Checked
-            self.repo.update_annotated(row["id"], checked)
-            row["annotated"] = int(checked)
-            self.dataChanged.emit(index, index, [Qt.CheckStateRole, Qt.DisplayRole])
-            return True
-        return False
 
     def flags(self, index: QModelIndex):
         if not index.isValid():
             return Qt.ItemIsEnabled
-        if index.column() == 0:
-            return Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable
         return Qt.ItemIsEnabled | Qt.ItemIsSelectable
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):
@@ -187,18 +241,22 @@ class CodesTableModel(QAbstractTableModel):
         return super().headerData(section, orientation, role)
 
 class MainWindow(QMainWindow):
-    def __init__(self, repo: CodeRepository, initial_theme: str = "Oscuro") -> None:
+    def __init__(self, repo: CodeRepository, home_path, initial_theme: str = "Oscuro") -> None:
         super().__init__()
         self.repo = repo
         self.theme_change_callback = None
+        
+        self.imagePath = Path.joinpath(home_path, "images")
+        self.iconApp = QPixmap(str(Path.joinpath(self.imagePath, "logo_app.png")))
+        self.setWindowIcon(QIcon(self.iconApp))
         
         # Frameless Window Setup
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint)
         self._old_pos = None
         
-        self.setWindowTitle("📦 CodeTrace - Gestor de Códigos")
+        self.setWindowTitle("CodeTrace - Gestor de Códigos")
         self.resize(1250, 750)
-        self.setMinimumSize(1250, 755)
+        self.setMinimumSize(1050, 700)
 
         # Main Layout Container
         self.main_container = QWidget()
@@ -217,26 +275,45 @@ class MainWindow(QMainWindow):
         title_layout.setContentsMargins(15, 0, 0, 0)
         title_layout.setSpacing(0)
         
-        title_icon = QLabel("📦")
-        title_icon.setStyleSheet("font-size: 16px; margin-right: 8px;")
+        # Icono de la barra de título (ruta preparada para icon_app.png)
+        self.title_icon = QLabel()
+        self.title_icon.setPixmap(QPixmap(self.iconApp).scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.title_icon.setStyleSheet("margin-right: 8px;")
         self.title_text = QLabel("CodeTrace - Gestor de Códigos")
         self.title_text.setObjectName("TitleLabel")
         
-        title_layout.addWidget(title_icon)
+        title_layout.addWidget(self.title_icon)
         title_layout.addWidget(self.title_text)
         title_layout.addStretch()
         
-        self.btn_min = QPushButton("—")
-        self.btn_max = QPushButton("▢")
-        self.btn_close = QPushButton("✕")
+        # Rutas de iconos para controles de ventana
+        window_icons_path = str(Path.joinpath(home_path, "images", "window_controls"))
+        
+        self.btn_min = QPushButton()
+        self.btn_min.setIcon(QIcon(f"{window_icons_path}/minimize.png"))
+        self.btn_min.setIconSize(QSize(30, 30))
+        self.btn_min.setObjectName("TitleButton")
+        self.btn_min.setFixedSize(40, 40)
+        self.btn_min.setCursor(Qt.PointingHandCursor)
+        
+        self.btn_max = QPushButton()
+        self.btn_max.setIcon(QIcon(f"{window_icons_path}/maximize.png"))
+        self.btn_max.setIconSize(QSize(25, 25))
+        self.btn_max.setObjectName("TitleButton")
+        self.btn_max.setFixedSize(40, 40)
+        self.btn_max.setCursor(Qt.PointingHandCursor)
+        self.icon_maximize_path = f"{window_icons_path}/maximize.png"
+        self.icon_restore_path = f"{window_icons_path}/restore.png"
+        
+        self.btn_close = QPushButton()
+        self.btn_close.setIcon(QIcon(f"{window_icons_path}/close.png"))
+        self.btn_close.setIconSize(QSize(50, 40))
+        self.btn_close.setObjectName("CloseButton")
+        self.btn_close.setFixedSize(50, 40)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
         
         for btn in [self.btn_min, self.btn_max, self.btn_close]:
-            btn.setObjectName("TitleButton")
-            btn.setFixedSize(45, 40)
-            btn.setCursor(Qt.PointingHandCursor)
             title_layout.addWidget(btn)
-        
-        self.btn_close.setObjectName("CloseButton")
         
         self.btn_min.clicked.connect(self.showMinimized)
         self.btn_max.clicked.connect(self._toggle_max_restore)
@@ -253,20 +330,45 @@ class MainWindow(QMainWindow):
 
         # === HEADER ===
         header = QHBoxLayout()
-        title_label = QLabel("📦 CodeTrace")
-        title_label.setStyleSheet(f"""
+        
+        # Logo/Icono del header (ruta preparada para icon_logo.png)
+        header_icon = QLabel()
+        icon_logo_path = str(Path.joinpath(home_path, "images", "icon_logo.png"))
+        if Path(icon_logo_path).exists():
+            header_icon.setPixmap(QPixmap(icon_logo_path).scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        header.addWidget(header_icon)
+        
+        self.title_label = QLabel("CodeTrace")
+        self.title_label.setObjectName("MainTitle")
+        self.title_label.setStyleSheet("""
             font-size: 24px;
             font-weight: bold;
-            color: {COLORS['text_primary']};
             padding: 8px 0;
+            margin-left: 8px;
         """)
-        header.addWidget(title_label)
+        iconLabel = QLabel()
+        iconLabel.setPixmap(self.iconApp.scaled(45, 45, Qt.KeepAspectRatio, Qt.SmoothTransformation))        
+        header.addWidget(iconLabel)
+        header.addWidget(self.title_label)
         header.addStretch()
         
+        # Icono de tema (ruta preparada para icon_theme.png)
+        theme_icon = QLabel()
+        icon_theme_path = str(Path.joinpath(home_path, "images", "icon_theme.png"))
+        if Path(icon_theme_path).exists():
+            theme_icon.setPixmap(QPixmap(icon_theme_path).scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        header.addWidget(theme_icon)
+        
+        theme_label = QLabel("Tema")
+        theme_label.setStyleSheet("margin-left: 4px;")
+        header.addWidget(theme_label)
+        
         self.theme_toggle = QComboBox()
-        self.theme_toggle.addItems(["🌙 Oscuro", "☀️ Claro"])
-        self.theme_toggle.setFixedWidth(130)
-        header.addWidget(QLabel("🎨 Tema"))
+        self.theme_toggle.setObjectName("ThemeCombo")
+        self.theme_toggle.addItems(["Oscuro", "Claro"])
+        self.theme_toggle.setFixedWidth(100)
+        self.theme_toggle.setMaxVisibleItems(2)
+        self.theme_toggle.view().setFixedWidth(98)
         header.addWidget(self.theme_toggle)
         content_layout.addLayout(header)
 
@@ -274,15 +376,40 @@ class MainWindow(QMainWindow):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
         
-        self.btn_add = QPushButton("➕ Agregar")
-        self.btn_edit = QPushButton("✏️ Editar")
-        self.btn_delete = QPushButton("🗑️ Borrar")
-        self.btn_import_txt = QPushButton("📄 Importar .txt")
-        self.btn_import_img = QPushButton("🖼️ OCR Imagen")
-        self.btn_clear = QPushButton("⚠️ Vaciar")
+        # Definir rutas de iconos específicas (carpeta actions)
+        icon_size = QSize(22, 22)
+        actions_path = str(Path.joinpath(home_path, "images", "actions"))
+        
+        self.btn_add = QPushButton("Agregar")
+        self.btn_add.setIcon(QIcon(f"{actions_path}/add.png"))
+        self.btn_add.setIconSize(icon_size)
+        
+        self.btn_edit = QPushButton("Editar")
+        self.btn_edit.setIcon(QIcon(f"{actions_path}/edit.png"))
+        self.btn_edit.setIconSize(icon_size)
+        
+        self.btn_delete = QPushButton("Borrar")
+        self.btn_delete.setIcon(QIcon(f"{actions_path}/delete.png"))
+        self.btn_delete.setIconSize(icon_size)
+        
+        self.btn_import = QPushButton("Importar")
+        self.btn_import.setIcon(QIcon(f"{actions_path}/import_txt.png"))
+        self.btn_import.setIconSize(icon_size)
+        
+        self.btn_import_img = QPushButton("OCR Imagen")
+        self.btn_import_img.setIcon(QIcon(f"{actions_path}/import_image.png"))
+        self.btn_import_img.setIconSize(icon_size)
+        
+        self.btn_export_csv = QPushButton("Exportar CSV")
+        self.btn_export_csv.setIcon(QIcon(f"{actions_path}/export.png"))
+        self.btn_export_csv.setIconSize(icon_size)
+        
+        self.btn_clear = QPushButton("Vaciar")
+        self.btn_clear.setIcon(QIcon(f"{actions_path}/warning_clear.png"))
+        self.btn_clear.setIconSize(icon_size)
         
         for btn in [self.btn_add, self.btn_edit, self.btn_delete, 
-                    self.btn_import_txt, self.btn_import_img]:
+                    self.btn_import, self.btn_import_img, self.btn_export_csv]:
             toolbar.addWidget(btn)
         
         toolbar.addStretch()
@@ -290,25 +417,17 @@ class MainWindow(QMainWindow):
         content_layout.addLayout(toolbar)
 
         # === FILTROS ===
-        filter_frame = QFrame()
-        filter_frame.setStyleSheet(f"""
-            QFrame {{
-                background: {COLORS['bg_card']};
-                border-radius: 12px;
-                padding: 8px;
-            }}
-        """)
-        filters = QHBoxLayout(filter_frame)
+        self.filter_frame = QFrame()
+        self.filter_frame.setObjectName("FilterFrame")
+        filters = QHBoxLayout(self.filter_frame)
         filters.setSpacing(16)
         
         # Filtros de checkbox
-        self.chk_anotados = QCheckBox("✅ Usados")
-        self.chk_no_anotados = QCheckBox("⬜ No usados")
-        self.chk_duplicados = QCheckBox("🔄 Duplicados")
+        self.chk_anotados = QCheckBox("Editados")
+        self.chk_no_anotados = QCheckBox("No Editados")
         
         filters.addWidget(self.chk_anotados)
         filters.addWidget(self.chk_no_anotados)
-        filters.addWidget(self.chk_duplicados)
         
         # Separador
         sep = QFrame()
@@ -316,8 +435,8 @@ class MainWindow(QMainWindow):
         sep.setStyleSheet(f"color: {COLORS['border_dark']};")
         filters.addWidget(sep)
         
-        # Filtro de status
-        filters.addWidget(QLabel("🏷️ Status:"))
+        # Filtro de estado
+        filters.addWidget(QLabel("Estado:"))
         self.status_filter = QComboBox()
         self.status_filter.addItem("Todos", None)
         for st in ALL_STATUSES:
@@ -328,9 +447,9 @@ class MainWindow(QMainWindow):
         filters.addStretch()
         
         # Orden
-        filters.addWidget(QLabel("↕️ Orden:"))
+        filters.addWidget(QLabel("Orden:"))
         self.sort = QComboBox()
-        self.sort.addItems(["Fecha ↓", "Fecha ↑", "Código A-Z", "Código Z-A", "Status"])
+        self.sort.addItems(["Fecha ↓", "Fecha ↑", "Código A-Z", "Código Z-A", "Estado"])
         self.sort.setFixedWidth(120)
         filters.addWidget(self.sort)
         
@@ -339,7 +458,7 @@ class MainWindow(QMainWindow):
         self.search.setFixedWidth(280)
         filters.addWidget(self.search)
         
-        content_layout.addWidget(filter_frame)
+        content_layout.addWidget(self.filter_frame)
 
         # === STATS BAR ===
         self.stats_label = QLabel()
@@ -362,44 +481,31 @@ class MainWindow(QMainWindow):
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
         
-        # Delegate para status
+        # Delegate para estado (badge)
         self.status_delegate = StatusBadgeDelegate()
-        self.table.setItemDelegateForColumn(4, self.status_delegate)
+        self.table.setItemDelegateForColumn(3, self.status_delegate)
         
         hh = self.table.horizontalHeader()
         try:
             from PyQt5.QtWidgets import QHeaderView
             hh.setStretchLastSection(False)
-            hh.setSectionResizeMode(0, QHeaderView.Fixed)
-            hh.setSectionResizeMode(1, QHeaderView.Stretch)
-            hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            hh.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-            hh.setSectionResizeMode(4, QHeaderView.Fixed)
+            hh.setSectionResizeMode(0, QHeaderView.Fixed)  # #
+            hh.setSectionResizeMode(1, QHeaderView.Stretch)  # Código
+            hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Fecha
+            hh.setSectionResizeMode(3, QHeaderView.Fixed)  # Estado
         except Exception:
             pass
 
         # Panel derecho con estadísticas
         right_panel = QWidget()
+        right_panel.setObjectName("StatsPanel")
+        right_panel.setMinimumWidth(250)
+        right_panel.setMaximumWidth(350)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setSpacing(16)
         
-        preview_title = QLabel("🖼️ Vista previa")
-        preview_title.setProperty("heading", True)
-        right_layout.addWidget(preview_title)
-        
-        self.preview = QLabel()
-        self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setMinimumWidth(280)
-        self.preview.setMinimumHeight(200)
-        self.preview.setStyleSheet(f"""
-            background: {COLORS['bg_card']};
-            border: 1px solid {COLORS['border_dark']};
-            border-radius: 12px;
-        """)
-        right_layout.addWidget(self.preview)
-        
         # Stats panel
-        stats_title = QLabel("📊 Estadísticas")
+        stats_title = QLabel("Estadísticas")
         stats_title.setProperty("heading", True)
         right_layout.addWidget(stats_title)
         
@@ -407,7 +513,7 @@ class MainWindow(QMainWindow):
         self.stats_widgets = {}
         for i, (st, label) in enumerate(STATUS_LABELS.items()):
             color = get_status_color(st)
-            stat_label = QLabel(f"🟢 {label}: 0")
+            stat_label = QLabel(f"{label}: 0")
             stat_label.setStyleSheet(f"""
                 color: {color};
                 font-weight: bold;
@@ -426,16 +532,19 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(self.table)
         splitter.addWidget(right_panel)
-        splitter.setSizes([850, 350])
-        content_layout.addWidget(splitter)
+        splitter.setStretchFactor(0, 1)  # La tabla se expande
+        splitter.setStretchFactor(1, 0)  # El panel derecho mantiene su tamaño
+        splitter.setSizes([850, 320])
+        content_layout.addWidget(splitter, 1)  # stretch=1 para que ocupe el espacio disponible
         
         # Add SizeGrip for resizing
         self.sizegrip = QSizeGrip(self)
         self.sizegrip.setFixedSize(16, 16)
 
         # === CONNECTIONS ===
-        self.btn_import_txt.clicked.connect(self.on_import_txt)
+        self.btn_import.clicked.connect(self.on_import_file)
         self.btn_import_img.clicked.connect(self.on_import_img)
+        self.btn_export_csv.clicked.connect(self.on_export_csv)
         self.btn_clear.clicked.connect(self.on_clear)
         self.btn_add.clicked.connect(self.on_add)
         self.btn_edit.clicked.connect(self.on_edit)
@@ -443,7 +552,6 @@ class MainWindow(QMainWindow):
         self.theme_toggle.currentTextChanged.connect(self.on_theme_changed)
         self.chk_anotados.stateChanged.connect(self.on_filters_changed)
         self.chk_no_anotados.stateChanged.connect(self.on_filters_changed)
-        self.chk_duplicados.stateChanged.connect(self.on_filters_changed)
         self.status_filter.currentIndexChanged.connect(self.on_filters_changed)
         self.search.textChanged.connect(self.on_filters_changed)
         self.sort.currentTextChanged.connect(self.on_sort_changed)
@@ -453,15 +561,15 @@ class MainWindow(QMainWindow):
         self.table_model.load()
         self._update_column_widths()
         self._update_stats()
-        self.theme_toggle.setCurrentText("🌙 Oscuro" if initial_theme == "Oscuro" else "☀️ Claro")
+        self.theme_toggle.setCurrentText("Oscuro" if initial_theme == "Oscuro" else "Claro")
 
     def _toggle_max_restore(self):
         if self.isMaximized():
             self.showNormal()
-            self.btn_max.setText("▢")
+            self.btn_max.setIcon(QIcon(self.icon_maximize_path))
         else:
             self.showMaximized()
-            self.btn_max.setText("❐")
+            self.btn_max.setIcon(QIcon(self.icon_restore_path))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -482,8 +590,10 @@ class MainWindow(QMainWindow):
         self.sizegrip.move(self.width() - self.sizegrip.width(), self.height() - self.sizegrip.height())
     
     def _update_column_widths(self):
-        self.table.setColumnWidth(0, 50)
-        self.table.setColumnWidth(4, 120)
+        """Ajusta el ancho de las columnas de la tabla."""
+        self.table.setColumnWidth(0, 40)   # # (número de fila)
+        self.table.setColumnWidth(2, 140)  # Fecha
+        self.table.setColumnWidth(3, 110)  # Estado badge
 
     def _update_stats(self):
         """Actualiza las estadísticas en el panel lateral."""
@@ -496,17 +606,66 @@ class MainWindow(QMainWindow):
             self.stats_widgets[st].setText(f"{label}: {count}")
         
         self.stats_label.setText(
-            f"📊 Total: {total} códigos  |  "
-            f"✅ Usados: {stats.get('annotated', 0)}  |  "
-            f"🔄 Duplicados: {stats.get('duplicates', 0)}"
+            f"Total: {total} códigos  |  "
+            f"Editados: {stats.get('annotated', 0)}"
         )
 
-    def on_import_txt(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Seleccionar archivo .txt", "", "Text Files (*.txt)")
+    def on_import_file(self) -> None:
+        """Importa códigos desde archivo TXT o CSV."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Seleccionar archivo", 
+            "", 
+            "Archivos soportados (*.txt *.csv);;Text Files (*.txt);;CSV Files (*.csv)"
+        )
         if not path:
             return
+        
         p = Path(path)
-        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        ext = p.suffix.lower()
+        items = []
+        
+        if ext == ".csv":
+            # Importar CSV con status
+            items = self._import_csv(p)
+        else:
+            # Importar TXT (solo códigos)
+            items = self._import_txt(p)
+        
+        if not items:
+            QMessageBox.information(self, "Importación", "No se encontraron códigos válidos.")
+            return
+        
+        # Verificar duplicados
+        codes_to_import = [item[0] for item in items]
+        existing = self.repo.codes_exist(codes_to_import)
+        
+        if existing:
+            # Filtrar códigos duplicados
+            items = [item for item in items if item[0] not in existing]
+            # Mostrar mensaje con códigos duplicados
+            dup_list = ", ".join(existing[:10])  # Mostrar máximo 10
+            if len(existing) > 10:
+                dup_list += f"... y {len(existing) - 10} más"
+            QMessageBox.warning(
+                self, 
+                "Códigos duplicados", 
+                f"Los siguientes códigos ya existen y no se importarán:\n\n{dup_list}"
+            )
+        
+        if not items:
+            QMessageBox.information(self, "Importación", "Todos los códigos ya existían.")
+            return
+        
+        self.repo.add_codes(items)
+        self.table_model.load()
+        self._update_column_widths()
+        self._update_stats()
+        QMessageBox.information(self, "Importación exitosa", f"Importados {len(items)} códigos.")
+    
+    def _import_txt(self, path: Path) -> list:
+        """Importa códigos desde un archivo TXT (un código por línea)."""
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         items = []
         for ln in lines:
             s = ln.strip().upper()
@@ -515,21 +674,94 @@ class MainWindow(QMainWindow):
             if not CODE_REGEX.match(s):
                 continue
             items.append((s, False, datetime.utcnow(), STATUS_DISPONIBLE))
-        if not items:
-            QMessageBox.information(self, "Importación", "No se encontraron códigos válidos.")
-            return
-        self.repo.add_codes(items)
-        self.table_model.load()
-        self._update_column_widths()
-        self._update_stats()
-        QMessageBox.information(self, "✅ Importación", f"Importados {len(items)} códigos.")
+        return items
+    
+    def _import_csv(self, path: Path) -> list:
+        """Importa códigos desde un archivo CSV exportado por CodeTrace.
+        Formato esperado: Código;Estado;Usado;Fecha
+        """
+        import csv
+        items = []
+        
+        # Mapeo inverso de etiquetas a códigos de status
+        label_to_status = {
+            "disponible": STATUS_DISPONIBLE,
+            "pendiente": STATUS_PENDIENTE,
+            "pedido": STATUS_PEDIDO,
+            "perdido": STATUS_PERDIDO,
+            "no hay más": STATUS_NO_HAY_MAS,
+            "último": STATUS_ULTIMO,
+        }
+        
+        try:
+            with open(path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f, delimiter=';')
+                
+                # Leer cabecera para detectar columnas
+                header = next(reader, None)
+                if not header:
+                    return []
+                
+                # Detectar índices de columnas (flexible)
+                header_lower = [h.strip().lower() for h in header]
+                
+                # Buscar columna de código
+                code_idx = None
+                for i, h in enumerate(header_lower):
+                    if 'código' in h or 'codigo' in h or 'code' in h:
+                        code_idx = i
+                        break
+                if code_idx is None:
+                    code_idx = 0  # Por defecto primera columna
+                
+                # Buscar columna de estado
+                status_idx = None
+                for i, h in enumerate(header_lower):
+                    if 'estado' in h or 'status' in h:
+                        status_idx = i
+                        break
+                if status_idx is None:
+                    status_idx = 1  # Por defecto columna 1
+                
+                # Buscar columna de usado/editado
+                usado_idx = None
+                for i, h in enumerate(header_lower):
+                    if 'usado' in h or 'editado' in h:
+                        usado_idx = i
+                        break
+                
+                for row in reader:
+                    if not row or len(row) <= code_idx:
+                        continue
+                    
+                    code = row[code_idx].strip().upper()
+                    if not code or not CODE_REGEX.match(code):
+                        continue
+                    
+                    # Obtener status
+                    status_text = row[status_idx].strip().lower() if status_idx is not None and len(row) > status_idx else ""
+                    status = label_to_status.get(status_text, STATUS_DISPONIBLE)
+                    
+                    # Obtener si está editado/usado
+                    editado = False
+                    if usado_idx is not None and len(row) > usado_idx:
+                        usado_text = row[usado_idx].strip().lower()
+                        editado = usado_text in ('sí', 'si', 'yes', '1', 'true')
+                    
+                    items.append((code, editado, datetime.utcnow(), status))
+                    
+        except Exception as e:
+            QMessageBox.warning(self, "Error CSV", f"Error al leer CSV: {e}")
+            return []
+        
+        return items
 
     def on_import_img(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Seleccionar imágenes", "", "Images (*.png *.jpg *.jpeg)")
         if not paths:
             return
         total = 0
-        first = None
+        all_duplicates = []
         for path in paths:
             p = Path(path)
             try:
@@ -537,26 +769,45 @@ class MainWindow(QMainWindow):
                 # Agregar status por defecto
                 items = [(code, ann, dt, STATUS_DISPONIBLE) for code, ann, dt in raw_items]
             except Exception as e:
-                QMessageBox.critical(self, "❌ OCR", f"Error en OCR: {e}")
+                QMessageBox.critical(self, "Error OCR", f"Error en OCR: {e}")
                 continue
             if items:
-                self.repo.add_codes(items)
-                total += len(items)
-                if first is None:
-                    first = p
+                # Verificar duplicados
+                codes_to_import = [item[0] for item in items]
+                existing = self.repo.codes_exist(codes_to_import)
+                if existing:
+                    all_duplicates.extend(existing)
+                    items = [item for item in items if item[0] not in existing]
+                if items:
+                    self.repo.add_codes(items)
+                    total += len(items)
+        
         self.table_model.load()
         self._update_column_widths()
         self._update_stats()
-        if first is not None:
-            pix = QPixmap(str(first))
-            self.preview.setPixmap(pix.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        
+        # Mostrar mensaje de duplicados si hay
+        if all_duplicates:
+            dup_list = ", ".join(all_duplicates[:10])
+            if len(all_duplicates) > 10:
+                dup_list += f"... y {len(all_duplicates) - 10} más"
+            QMessageBox.warning(
+                self, 
+                "Códigos duplicados", 
+                f"Los siguientes códigos ya existían y no se importaron:\n\n{dup_list}"
+            )
+        
         if total > 0:
-            QMessageBox.information(self, "✅ OCR", f"Importados {total} códigos desde imágenes.")
-        else:
-            QMessageBox.information(self, "⚠️ OCR", "No se detectaron códigos válidos.")
+            QMessageBox.information(self, "OCR exitoso", f"Importados {total} códigos desde imágenes.")
+        elif not all_duplicates:
+            QMessageBox.information(self, "OCR sin resultados", "No se detectaron códigos válidos.")
+
+    def on_export_csv(self) -> None:
+        """Exporta los datos actuales de la tabla a CSV."""
+        export_to_csv(self, self.table_model.rows, STATUS_LABELS)
 
     def on_clear(self) -> None:
-        ok = QMessageBox.question(self, "⚠️ Confirmar", "¿Eliminar TODOS los códigos? Esta acción no se puede deshacer.")
+        ok = QMessageBox.question(self, "Confirmar", "¿Eliminar TODOS los códigos? Esta acción no se puede deshacer.")
         if ok == QMessageBox.Yes:
             self.repo.remove_all()
             self.table_model.load()
@@ -574,12 +825,11 @@ class MainWindow(QMainWindow):
         return sel[0].row()
 
     def on_add(self) -> None:
-        dlg = QDialog(self)
-        dlg.setWindowTitle("➕ Agregar código")
-        dlg.setMinimumWidth(350)
-        fl = QFormLayout(dlg)
-        fl.setSpacing(16)
-        fl.setContentsMargins(20, 20, 20, 20)
+        dlg = CodeDialog("Agregar código", self)
+        dlg.setMinimumWidth(380)
+        
+        fl = QFormLayout()
+        fl.setSpacing(12)
         
         le = QLineEdit()
         le.setPlaceholderText("Ej: TY568467")
@@ -588,19 +838,22 @@ class MainWindow(QMainWindow):
         for st in ALL_STATUSES:
             status_combo.addItem(STATUS_LABELS[st], st)
         
-        cb = QCheckBox("Marcar como usado")
+        cb = QCheckBox("Marcar como editado")
         
-        fl.addRow("🏷️ Código:", le)
-        fl.addRow("📌 Status:", status_combo)
+        fl.addRow("Código:", le)
+        fl.addRow("Estado:", status_combo)
         fl.addRow("", cb)
+        
+        dlg.content_layout.addLayout(fl)
         
         btns = QHBoxLayout()
         btns.setSpacing(10)
-        b_ok = QPushButton("✅ Guardar")
-        b_cancel = QPushButton("❌ Cancelar")
+        b_ok = QPushButton("Guardar")
+        b_cancel = QPushButton("Cancelar")
+        b_cancel.setProperty("secondary", True)
         btns.addWidget(b_ok)
         btns.addWidget(b_cancel)
-        fl.addRow(btns)
+        dlg.content_layout.addLayout(btns)
         
         b_ok.clicked.connect(dlg.accept)
         b_cancel.clicked.connect(dlg.reject)
@@ -608,7 +861,16 @@ class MainWindow(QMainWindow):
         if dlg.exec_() == QDialog.Accepted:
             s = le.text().strip().upper()
             if not s or not CODE_REGEX.match(s):
-                QMessageBox.warning(self, "⚠️ Validación", "Código inválido. Formato: 2-5 letras + 3-9 números")
+                QMessageBox.warning(self, "Validación", "Código inválido. Formato: 2-5 letras + 3-9 números")
+                return
+            # Verificar duplicado
+            existing = self.repo.codes_exist([s])
+            if existing:
+                QMessageBox.warning(
+                    self, 
+                    "Código duplicado", 
+                    f"El código {s} ya existe en la base de datos."
+                )
                 return
             status = status_combo.currentData()
             self.repo.add_codes([(s, cb.isChecked(), datetime.utcnow(), status)])
@@ -619,16 +881,15 @@ class MainWindow(QMainWindow):
     def on_edit(self, index=None) -> None:
         r = self._selected_row()
         if r is None:
-            QMessageBox.information(self, "✏️ Edición", "Selecciona una fila para editar.")
+            QMessageBox.information(self, "Edición", "Selecciona una fila para editar.")
             return
         row = self.table_model.rows[r]
         
-        dlg = QDialog(self)
-        dlg.setWindowTitle("✏️ Editar código")
-        dlg.setMinimumWidth(350)
-        fl = QFormLayout(dlg)
-        fl.setSpacing(16)
-        fl.setContentsMargins(20, 20, 20, 20)
+        dlg = CodeDialog("Editar código", self)
+        dlg.setMinimumWidth(380)
+        
+        fl = QFormLayout()
+        fl.setSpacing(12)
         
         le = QLineEdit(row["code"])
         
@@ -639,20 +900,23 @@ class MainWindow(QMainWindow):
             if st == current_status:
                 status_combo.setCurrentIndex(status_combo.count() - 1)
         
-        cb = QCheckBox("Marcar como usado")
+        cb = QCheckBox("Marcar como editado")
         cb.setChecked(bool(row["annotated"]))
         
-        fl.addRow("🏷️ Código:", le)
-        fl.addRow("📌 Status:", status_combo)
+        fl.addRow("Código:", le)
+        fl.addRow("Estado:", status_combo)
         fl.addRow("", cb)
+        
+        dlg.content_layout.addLayout(fl)
         
         btns = QHBoxLayout()
         btns.setSpacing(10)
-        b_ok = QPushButton("✅ Guardar")
-        b_cancel = QPushButton("❌ Cancelar")
+        b_ok = QPushButton("Guardar")
+        b_cancel = QPushButton("Cancelar")
+        b_cancel.setProperty("secondary", True)
         btns.addWidget(b_ok)
         btns.addWidget(b_cancel)
-        fl.addRow(btns)
+        dlg.content_layout.addLayout(btns)
         
         b_ok.clicked.connect(dlg.accept)
         b_cancel.clicked.connect(dlg.reject)
@@ -660,7 +924,7 @@ class MainWindow(QMainWindow):
         if dlg.exec_() == QDialog.Accepted:
             s = le.text().strip().upper()
             if not s or not CODE_REGEX.match(s):
-                QMessageBox.warning(self, "⚠️ Validación", "Código inválido. Formato: 2-5 letras + 3-9 números")
+                QMessageBox.warning(self, "Validación", "Código inválido. Formato: 2-5 letras + 3-9 números")
                 return
             status = status_combo.currentData()
             self.repo.update_code(row["id"], s, cb.isChecked(), status)
@@ -671,10 +935,10 @@ class MainWindow(QMainWindow):
     def on_delete(self) -> None:
         r = self._selected_row()
         if r is None:
-            QMessageBox.information(self, "🗑️ Borrar", "Selecciona una fila para borrar.")
+            QMessageBox.information(self, "Borrar", "Selecciona una fila para borrar.")
             return
         row = self.table_model.rows[r]
-        ok = QMessageBox.question(self, "⚠️ Confirmar", f"¿Eliminar código {row['code']}?")
+        ok = QMessageBox.question(self, "Confirmar", f"¿Eliminar código {row['code']}?")
         if ok == QMessageBox.Yes:
             self.repo.delete_code(row["id"])
             self.table_model.load()
@@ -690,9 +954,7 @@ class MainWindow(QMainWindow):
         else:
             self.table_model.annotated_filter = None
         
-        self.table_model.duplicates_only = self.chk_duplicados.isChecked()
-        
-        # Filtro de status
+        # Filtro de estado
         self.table_model.status_filter = self.status_filter.currentData()
         
         # Obtener texto limpio del autocompletado
@@ -715,7 +977,7 @@ class MainWindow(QMainWindow):
         elif "Z-A" in text:
             self.table_model.order_by = "code"
             self.table_model.order_dir = "DESC"
-        elif "Status" in text:
+        elif "Estado" in text:
             self.table_model.order_by = "status"
             self.table_model.order_dir = "ASC"
         self.table_model.load()

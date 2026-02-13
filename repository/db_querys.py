@@ -7,15 +7,17 @@ DB_NAME = "codes.db"
 FULL_DB_PATH = Path.joinpath(Path.cwd(), "db", DB_NAME)
 
 # Estados posibles para los códigos
-STATUS_DISPONIBLE = "disponible"
-STATUS_PEDIDO = "pedido"
-STATUS_PERDIDO = "perdido"
-STATUS_NO_HAY_MAS = "no_hay_mas"
-STATUS_ULTIMO = "ultimo"
+STATUS_DISPONIBLE = "disponible"  # En stock y sin editar
+STATUS_PENDIENTE = "pendiente"    # Pendiente a ser pedido
+STATUS_PEDIDO = "pedido"          # Ya pedido, por bajar al picking
+STATUS_ULTIMO = "ultimo"          # Últimos productos de ese código
+STATUS_PERDIDO = "perdido"        # Caja perdida, no se encuentra
+STATUS_NO_HAY_MAS = "no_hay_mas"  # Agotado, no hay más en stock
 
-ALL_STATUSES = [STATUS_DISPONIBLE, STATUS_PEDIDO, STATUS_ULTIMO, STATUS_PERDIDO, STATUS_NO_HAY_MAS]
+ALL_STATUSES = [STATUS_DISPONIBLE, STATUS_PENDIENTE, STATUS_PEDIDO, STATUS_ULTIMO, STATUS_PERDIDO, STATUS_NO_HAY_MAS]
 STATUS_LABELS = {
     STATUS_DISPONIBLE: "Disponible",
+    STATUS_PENDIENTE: "Pendiente",
     STATUS_PEDIDO: "Pedido",
     STATUS_ULTIMO: "Último",
     STATUS_PERDIDO: "Perdido",
@@ -25,10 +27,22 @@ STATUS_LABELS = {
 class CodeRepository:
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = Path(db_path) if db_path else Path(FULL_DB_PATH)
-        self.conn = sqlite3.connect(str(self.db_path))
-        self.conn.row_factory = sqlite3.Row
-        self._init_db()
-
+        try:
+            if Path.exists(FULL_DB_PATH):
+                self.db_path = Path(db_path) if db_path else Path(FULL_DB_PATH)
+                self.conn = sqlite3.connect(str(self.db_path))
+                self.conn.row_factory = sqlite3.Row
+                self._init_db()
+            else:
+                Path.mkdir(FULL_DB_PATH.parent, parents=True, exist_ok=True)
+                self.conn = sqlite3.connect(str(self.db_path))
+                self.conn.row_factory = sqlite3.Row
+                self._init_db()
+                self.db_path = Path(db_path) if db_path else Path(FULL_DB_PATH)        
+        except Exception as e:
+            print(f"Error al conectar o inicializar la base de datos: {e}")
+            raise
+    
     def _init_db(self) -> None:
         cur = self.conn.cursor()
         cur.execute(
@@ -177,3 +191,16 @@ class CodeRepository:
             (f"{prefix.upper()}%", limit)
         )
         return [{"code": row["code"], "status": row["status"]} for row in cur.fetchall()]
+
+    def codes_exist(self, codes: List[str]) -> List[str]:
+        """Verifica cuáles códigos ya existen en la base de datos.
+        Retorna lista de códigos que ya existen (duplicados)."""
+        if not codes:
+            return []
+        cur = self.conn.cursor()
+        placeholders = ",".join("?" * len(codes))
+        cur.execute(
+            f"SELECT DISTINCT code FROM codes WHERE code IN ({placeholders})",
+            [c.upper() for c in codes]
+        )
+        return [row["code"] for row in cur.fetchall()]
