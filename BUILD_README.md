@@ -17,10 +17,13 @@ CodeTrace/
 ├── main.py              # Punto de entrada
 ├── build.bat            # Script de compilación automática
 ├── modules/
-│   └── ocr.py           # Módulo OCR con Tesseract
-├── tesseract/           # Tesseract OCR portable (incluido)
-│   ├── tesseract.exe
-│   └── tessdata/
+│   └── ocr.py           # Módulo OCR con EasyOCR
+├── ui/
+│   └── ui.py            # Interfaz de usuario PyQt5
+├── repository/
+│   └── db_querys.py     # Consultas a base de datos
+├── styles/
+│   └── styles.py        # Temas claro y oscuro
 ├── images/              # Iconos e imágenes
 ├── installer/
 │   └── CodeTrace.iss    # Script de Inno Setup
@@ -52,7 +55,7 @@ pyinstaller main.py -w --onefile --icon images/logo_app.png -n CodeTrace
 
 ## Archivos Generados
 
-- `dist/CodeTrace.exe` - Ejecutable portable (requiere copiar tesseract/ e images/)
+- `dist/CodeTrace.exe` - Ejecutable portable (requiere copiar images/)
 - `dist/CodeTrace_Setup_1.0.0.exe` - Instalador completo (incluye todo)
 
 ## Distribución
@@ -60,7 +63,6 @@ pyinstaller main.py -w --onefile --icon images/logo_app.png -n CodeTrace
 ### Usando el Instalador (Recomendado)
 Distribuye `CodeTrace_Setup_1.0.0.exe`. El instalador:
 - Instala el ejecutable en Program Files
-- Copia Tesseract OCR automáticamente
 - Crea accesos directos
 - Permite desinstalar limpiamente
 
@@ -69,18 +71,15 @@ Para una versión portable, copia estos archivos/carpetas juntos:
 ```
 CodeTrace/
 ├── CodeTrace.exe
-├── tesseract/
 └── images/
 ```
 
 ## Notas Técnicas
 
-### Tesseract OCR
-- La aplicación configura automáticamente la variable `TESSDATA_PREFIX`
-- Tesseract debe estar en la carpeta `tesseract/` junto al ejecutable
-- Se incluye solo el idioma inglés (`eng.traineddata`)
+### EasyOCR
+- EasyOCR se incluye como dependencia Python (no requiere instalación externa)
+- Los modelos se descargan automáticamente la primera vez que se usa
+- Soporta GPU si está disponible (CUDA), pero funciona bien en CPU
 
-### Rutas
-El módulo OCR detecta automáticamente si está en:
-- **Desarrollo**: Usa rutas relativas al proyecto
-- **Compilado**: Usa rutas relativas al ejecutable
+### Prefijos de Códigos Soportados
+CQ, CGF, CHW, TY, CAT, BAT, GF, BST, ST, CST, PF, CPF, KC, CKC, HW, QC, TL, CTL

@@ -4,23 +4,24 @@ CodeTrace es una aplicación de escritorio moderna y robusta diseñada para la g
 
 ## ✨ Características Principales
 
-- **🖼️ Extracción OCR Avanzada**: Importa códigos directamente desde imágenes utilizando Tesseract OCR y preprocesamiento con OpenCV.
+- **🖼️ Extracción OCR Avanzada**: Importa códigos directamente desde imágenes utilizando EasyOCR con preprocesamiento OpenCV.
 - **🛠️ Gestión CRUD Completa**: Crea, lee, actualiza y elimina códigos de forma sencilla.
 - **🎨 Interfaz Personalizada (Frameless)**: Ventana moderna sin bordes nativos, con barra de título personalizada y controles integrados.
 - **🌓 Temas Dinámicos**: Soporte para Modo Oscuro (Futurista) y Modo Claro (Minimalista) con cambio en tiempo real.
+- **🔐 Sistema de Login**: Control de acceso con roles (admin/peon) para permisos diferenciados.
 - **🔍 Búsqueda Inteligente**: Autocompletado histórico que muestra el estado de los códigos mientras escribes.
 - **📊 Estadísticas en Vivo**: Panel lateral con conteo automático por estados (Disponible, Pedido, Último de su tipo, etc.).
-- **📥 Importación Masiva**: Soporte para archivos `.txt` y procesamiento por lotes de imágenes.
+- **📥 Importación Masiva**: Soporte para archivos `.txt`, `.csv` y procesamiento por lotes de imágenes.
 
 ## 🚀 Tecnologías Utilizadas
 
-- **Lenguaje**: Python 3.x
+- **Lenguaje**: Python 3.8+
 - **Interfaz Gráfica**: PyQt5
 - **Base de Datos**: SQLite3
 - **Procesamiento de Imágenes**: 
   - OpenCV (cv2)
   - Pillow (PIL)
-- **Motor OCR**: Tesseract OCR (pytesseract)
+- **Motor OCR**: EasyOCR (no requiere instalación externa)
 
 ## 🛠️ Instalación
 
@@ -32,13 +33,8 @@ CodeTrace es una aplicación de escritorio moderna y robusta diseñada para la g
 
 2. **Instalar dependencias**:
    ```bash
-   pip install PyQt5 pytesseract Pillow opencv-python numpy
+   pip install -r requirements.txt
    ```
-
-3. **Instalar Tesseract OCR**:
-   - Es necesario tener instalado el motor de Tesseract en el sistema.
-   - **Windows**: Descargar el instalador desde [UB-Mannheim](https://github.com/UB-Mannheim/tesseract/wiki).
-   - **Linux**: `sudo apt install tesseract-ocr`
 
 ## 📖 Uso
 
