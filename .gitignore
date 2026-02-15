@@ -9,3 +9,15 @@ db/
 *.rar
 *.zip
 *.tar.gz
+installer/
+*.egg-info/
+*.egg
+*.log
+*.bak
+*.tmp
+*.exe
+*.bat
+debug_ocr.py
+tesseract/
+recovered/
+pyinstxtractor.py

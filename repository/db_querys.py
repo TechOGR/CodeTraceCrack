@@ -204,3 +204,28 @@ class CodeRepository:
             [c.upper() for c in codes]
         )
         return [row["code"] for row in cur.fetchall()]
+
+    def get_codes_with_status(self, codes: List[str]) -> Dict[str, str]:
+        """Retorna un diccionario {codigo: status} para los códigos que existen."""
+        if not codes:
+            return {}
+        cur = self.conn.cursor()
+        placeholders = ",".join("?" * len(codes))
+        cur.execute(
+            f"SELECT code, status FROM codes WHERE code IN ({placeholders})",
+            [c.upper() for c in codes]
+        )
+        return {row["code"]: row["status"] for row in cur.fetchall()}
+
+    def update_status_if_default(self, code: str, new_status: str) -> bool:
+        """
+        Actualiza el status de un código SOLO si su status actual es 'disponible'.
+        Retorna True si se actualizó, False si no.
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE codes SET status = ? WHERE code = ? AND status = ?",
+            (new_status, code.upper(), STATUS_DISPONIBLE)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0

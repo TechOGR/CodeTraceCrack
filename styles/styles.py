@@ -81,19 +81,25 @@ def apply_dark_theme(app: QApplication) -> None:
             background: transparent;
             border: none;
             border-radius: 0px;
-            color: {COLORS["text_secondary"]};
-            font-size: 16px;
-            min-width: 45px;
-            max-width: 45px;
+            min-width: 50px;
+            max-width: 50px;
         }}
         
         #TitleButton:hover {{
             background: rgba(255, 255, 255, 0.1);
         }}
         
+        #CloseButton {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 {COLORS["warning"]}, stop:1 {COLORS["error"]});
+            border: none;
+            border-radius: 0px;
+            min-width: 60px;
+            max-width: 60px;
+        }}
+        
         #CloseButton:hover {{
             background: {COLORS["error"]};
-            color: white;
         }}
 
         /* === MAIN WINDOW === */
@@ -570,19 +576,25 @@ def apply_light_theme(app: QApplication) -> None:
             background: transparent;
             border: none;
             border-radius: 0px;
-            color: {LIGHT["text_on_accent"]};
-            font-size: 16px;
-            min-width: 45px;
-            max-width: 45px;
+            min-width: 50px;
+            max-width: 50px;
         }}
         
         #TitleButton:hover {{
             background: rgba(255, 255, 255, 0.25);
         }}
         
+        #CloseButton {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 {LIGHT["warning"]}, stop:1 {LIGHT["error"]});
+            border: none;
+            border-radius: 0px;
+            min-width: 60px;
+            max-width: 60px;
+        }}
+        
         #CloseButton:hover {{
             background: {LIGHT["error"]};
-            color: white;
         }}
 
         /* === MAIN WINDOW === */

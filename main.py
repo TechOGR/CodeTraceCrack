@@ -1,13 +1,13 @@
 import sys
-import tempfile
 import atexit
+
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 
 from repository.db_querys import CodeRepository
 from styles.styles import apply_dark_theme, apply_light_theme
-from ui.ui import MainWindow
+from ui.ui import MainWindow, LoginDialog
 
 from pathlib import Path
 
@@ -64,17 +64,38 @@ def run() -> None:
     # Registrar cleanup al salir
     atexit.register(instance_lock.unlock)
     
-    apply_dark_theme(app)
-    repo = CodeRepository()
-    win = MainWindow(repo, initial_theme="Oscuro", home_path=Path.cwd())
-    def on_theme(text: str) -> None:
-        if text == "Oscuro":
-            apply_dark_theme(app)
-        else:
-            apply_light_theme(app)
-    win.theme_change_callback = on_theme
-    win.show()
-    sys.exit(app.exec_())
+    apply_light_theme(app)  # Start with light theme
+    
+    while True:
+        # Show login dialog
+        login = LoginDialog()
+        if login.exec_() != 1:  # User cancelled or closed
+            instance_lock.unlock()
+            sys.exit(0)
+        
+        user_role = login.user_role
+        username = login.username
+        
+        repo = CodeRepository()
+        win = MainWindow(repo, initial_theme="Claro", home_path=Path.cwd(), user_role=user_role, username=username)
+        
+        def on_theme(text: str) -> None:
+            if text == "Oscuro":
+                apply_dark_theme(app)
+            else:
+                apply_light_theme(app)
+        
+        win.theme_change_callback = on_theme
+        win.show()
+        app.exec_()
+        
+        # Check if logout was requested
+        if not win.logout_requested:
+            break
+        # Reset theme for next login
+        apply_light_theme(app)
+    
+    sys.exit(0)
 
 if __name__ == "__main__":
     run()
