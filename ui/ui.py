@@ -89,7 +89,7 @@ class AutocompleteSearchEdit(QLineEdit):
 
 
 class LoginDialog(QDialog):
-    """Diálogo de login con usuario y contraseña."""
+    """Diálogo de login con usuario y contraseña con validación en tiempo real."""
     USERS = {
         'peon': ('1234', 'peon'),
         'admin': ('admin', 'admin')
@@ -134,70 +134,264 @@ class LoginDialog(QDialog):
         self.content_widget.setObjectName('DialogContent')
         self.content_layout = QVBoxLayout(self.content_widget)
         self.content_layout.setContentsMargins(40, 35, 40, 35)
-        self.content_layout.setSpacing(20)
+        self.content_layout.setSpacing(16)
         
-        # User input with label
+        # User input with validation indicator
         user_container = QVBoxLayout()
         user_container.setSpacing(6)
         user_label = QLabel('Usuario')
         user_label.setStyleSheet('font-weight: 600; font-size: 13px;')
+        user_row = QHBoxLayout()
+        user_row.setSpacing(8)
         self.user_input = QLineEdit()
         self.user_input.setPlaceholderText('Ingresa tu usuario')
         self.user_input.setFixedHeight(42)
-        self.user_input.setStyleSheet('padding: 10px 14px;')
+        self.user_input.setText('peon')  # Default user
+        self.user_indicator = QLabel()
+        self.user_indicator.setFixedSize(24, 24)
+        user_row.addWidget(self.user_input)
+        user_row.addWidget(self.user_indicator)
         user_container.addWidget(user_label)
-        user_container.addWidget(self.user_input)
+        user_container.addLayout(user_row)
         self.content_layout.addLayout(user_container)
         
-        # Password input with label
+        # Password input with validation indicator
         pass_container = QVBoxLayout()
         pass_container.setSpacing(6)
         pass_label = QLabel('Contraseña')
         pass_label.setStyleSheet('font-weight: 600; font-size: 13px;')
+        pass_row = QHBoxLayout()
+        pass_row.setSpacing(8)
         self.pass_input = QLineEdit()
         self.pass_input.setPlaceholderText('Ingresa tu contraseña')
         self.pass_input.setEchoMode(QLineEdit.Password)
         self.pass_input.setFixedHeight(42)
-        self.pass_input.setStyleSheet('padding: 10px 14px;')
-        self.pass_input.returnPressed.connect(self._do_login)
+        self.pass_input.setText('1234')  # Default password
+        self.pass_indicator = QLabel()
+        self.pass_indicator.setFixedSize(24, 24)
+        pass_row.addWidget(self.pass_input)
+        pass_row.addWidget(self.pass_indicator)
         pass_container.addWidget(pass_label)
-        pass_container.addWidget(self.pass_input)
+        pass_container.addLayout(pass_row)
         self.content_layout.addLayout(pass_container)
         
-        # Error label
-        self.error_label = QLabel('')
-        self.error_label.setStyleSheet('color: #ef4444; font-size: 12px; padding: 4px 0;')
-        self.error_label.setAlignment(Qt.AlignCenter)
-        self.error_label.setVisible(False)
-        self.content_layout.addWidget(self.error_label)
-        
-        # Login button
+        # Login button (disabled by default until validation passes)
         self.btn_login = QPushButton('Iniciar Sesión')
         self.btn_login.setFixedHeight(44)
         self.btn_login.setCursor(Qt.PointingHandCursor)
         self.btn_login.setStyleSheet('font-size: 14px; font-weight: 600;')
+        self.btn_login.setEnabled(False)
         self.btn_login.clicked.connect(self._do_login)
         self.content_layout.addWidget(self.btn_login)
         
         main_layout.addWidget(self.content_widget)
-        self.setFixedSize(380, 320)
+        self.setFixedSize(400, 280)
+        
+        # Connect validation
+        self.user_input.textChanged.connect(self._validate)
+        self.pass_input.textChanged.connect(self._validate)
+        self.pass_input.returnPressed.connect(self._do_login)
+        
+        # Initial validation
+        self._validate()
     
-    def _do_login(self):
+    def _validate(self):
+        """Valida usuario y contraseña en tiempo real."""
         user = self.user_input.text().strip().lower()
         pwd = self.pass_input.text()
         
-        if user in self.USERS:
-            expected_pwd, role = self.USERS[user]
-            if pwd == expected_pwd:
-                self.username = user
-                self.user_role = role
-                self.accept()
-                return
+        # Validate user
+        user_valid = user in self.USERS
+        if user:
+            if user_valid:
+                self.user_indicator.setText('✓')
+                self.user_indicator.setStyleSheet('''
+                    color: #22c55e;
+                    font-size: 18px;
+                    font-weight: bold;
+                ''')
+            else:
+                self.user_indicator.setText('✗')
+                self.user_indicator.setStyleSheet('''
+                    color: #ef4444;
+                    font-size: 18px;
+                    font-weight: bold;
+                ''')
+        else:
+            self.user_indicator.setText('')
         
-        self.error_label.setText('Usuario o contraseña incorrectos')
-        self.error_label.setVisible(True)
-        self.pass_input.clear()
+        # Validate password
+        pass_valid = False
+        if user_valid and pwd:
+            expected_pwd, _ = self.USERS[user]
+            pass_valid = pwd == expected_pwd
+            if pass_valid:
+                self.pass_indicator.setText('✓')
+                self.pass_indicator.setStyleSheet('''
+                    color: #22c55e;
+                    font-size: 18px;
+                    font-weight: bold;
+                ''')
+            else:
+                self.pass_indicator.setText('✗')
+                self.pass_indicator.setStyleSheet('''
+                    color: #ef4444;
+                    font-size: 18px;
+                    font-weight: bold;
+                ''')
+        elif pwd and not user_valid:
+            self.pass_indicator.setText('✗')
+            self.pass_indicator.setStyleSheet('''
+                color: #ef4444;
+                font-size: 18px;
+                font-weight: bold;
+            ''')
+        else:
+            self.pass_indicator.setText('')
+        
+        # Enable/disable login button
+        self.btn_login.setEnabled(user_valid and pass_valid)
+    
+    def _do_login(self):
+        if not self.btn_login.isEnabled():
+            return
+        user = self.user_input.text().strip().lower()
+        _, role = self.USERS[user]
+        self.username = user
+        self.user_role = role
+        self.accept()
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.title_bar.geometry().contains(event.pos()):
+            self._old_pos = event.globalPos()
+    
+    def mouseMoveEvent(self, event):
+        if self._old_pos is not None:
+            delta = QPoint(event.globalPos() - self._old_pos)
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self._old_pos = event.globalPos()
+    
+    def mouseReleaseEvent(self, event):
+        self._old_pos = None
+
+
+class SwitchUserDialog(QDialog):
+    """Diálogo rápido para cambiar de usuario sin volver al login completo."""
+    USERS = LoginDialog.USERS
+    
+    def __init__(self, current_user: str, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setObjectName('CodeDialog')
+        self._old_pos = None
+        self.current_user = current_user
+        # Get the other user
+        self.target_user = 'admin' if current_user == 'peon' else 'peon'
+        self.user_role = None
+        self.username = None
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Title bar
+        self.title_bar = QWidget()
+        self.title_bar.setObjectName('DialogTitleBar')
+        self.title_bar.setFixedHeight(40)
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(8)
+        
+        self.btn_close = QPushButton('×')
+        self.btn_close.setObjectName('DialogCloseButton')
+        self.btn_close.setFixedSize(40, 40)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.clicked.connect(self.reject)
+        title_layout.addWidget(self.btn_close)
+        
+        self.title_label = QLabel(f'Cambiar a {self.target_user.capitalize()}')
+        self.title_label.setObjectName('DialogTitleLabel')
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        main_layout.addWidget(self.title_bar)
+        
+        # Content
+        self.content_widget = QWidget()
+        self.content_widget.setObjectName('DialogContent')
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(40, 25, 40, 30)
+        self.content_layout.setSpacing(16)
+        
+        # Info label
+        info_label = QLabel(f'Ingresa la contraseña de {self.target_user.capitalize()}')
+        info_label.setStyleSheet('font-size: 13px; color: #94a3b8;')
+        info_label.setAlignment(Qt.AlignCenter)
+        self.content_layout.addWidget(info_label)
+        
+        # Password input with validation indicator
+        pass_row = QHBoxLayout()
+        pass_row.setSpacing(8)
+        self.pass_input = QLineEdit()
+        self.pass_input.setPlaceholderText('Contraseña')
+        self.pass_input.setEchoMode(QLineEdit.Password)
+        self.pass_input.setFixedHeight(42)
+        self.pass_indicator = QLabel()
+        self.pass_indicator.setFixedSize(24, 24)
+        pass_row.addWidget(self.pass_input)
+        pass_row.addWidget(self.pass_indicator)
+        self.content_layout.addLayout(pass_row)
+        
+        # Switch button
+        self.btn_switch = QPushButton(f'Cambiar a {self.target_user.capitalize()}')
+        self.btn_switch.setFixedHeight(44)
+        self.btn_switch.setCursor(Qt.PointingHandCursor)
+        self.btn_switch.setStyleSheet('font-size: 14px; font-weight: 600;')
+        self.btn_switch.setEnabled(False)
+        self.btn_switch.clicked.connect(self._do_switch)
+        self.content_layout.addWidget(self.btn_switch)
+        
+        main_layout.addWidget(self.content_widget)
+        self.setFixedSize(350, 200)
+        
+        # Connect validation
+        self.pass_input.textChanged.connect(self._validate)
+        self.pass_input.returnPressed.connect(self._do_switch)
         self.pass_input.setFocus()
+    
+    def _validate(self):
+        """Valida la contraseña en tiempo real."""
+        pwd = self.pass_input.text()
+        expected_pwd, _ = self.USERS[self.target_user]
+        
+        if pwd:
+            if pwd == expected_pwd:
+                self.pass_indicator.setText('✓')
+                self.pass_indicator.setStyleSheet('''
+                    color: #22c55e;
+                    font-size: 18px;
+                    font-weight: bold;
+                ''')
+                self.btn_switch.setEnabled(True)
+            else:
+                self.pass_indicator.setText('✗')
+                self.pass_indicator.setStyleSheet('''
+                    color: #ef4444;
+                    font-size: 18px;
+                    font-weight: bold;
+                ''')
+                self.btn_switch.setEnabled(False)
+        else:
+            self.pass_indicator.setText('')
+            self.btn_switch.setEnabled(False)
+    
+    def _do_switch(self):
+        if not self.btn_switch.isEnabled():
+            return
+        _, role = self.USERS[self.target_user]
+        self.username = self.target_user
+        self.user_role = role
+        self.accept()
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.title_bar.geometry().contains(event.pos()):
@@ -466,12 +660,13 @@ class MainWindow(QMainWindow):
         self.user_name_label = QLabel(self.username.capitalize())
         self.user_name_label.setStyleSheet('font-weight: bold; font-size: 13px;')
         user_layout.addWidget(self.user_name_label)
-        # Logout button
-        self.btn_logout = QPushButton('✕')
+        # Logout button (switch user)
+        other_user = 'admin' if self.username == 'peon' else 'peon'
+        self.btn_logout = QPushButton('⇄')
         self.btn_logout.setObjectName('LogoutButton')
         self.btn_logout.setFixedSize(24, 24)
         self.btn_logout.setCursor(Qt.PointingHandCursor)
-        self.btn_logout.setToolTip('Cerrar sesión')
+        self.btn_logout.setToolTip(f'Cambiar a {other_user.capitalize()}')
         self.btn_logout.setStyleSheet('''
             QPushButton#LogoutButton {
                 background: rgba(239, 68, 68, 0.15);
@@ -817,15 +1012,44 @@ class MainWindow(QMainWindow):
             self.btn_import_img.setEnabled(False)
             self.btn_export_csv.setEnabled(False)
             # Disable double-click edit for peon
-            self.table.doubleClicked.disconnect(self.on_edit)
+            try:
+                self.table.doubleClicked.disconnect(self.on_edit)
+            except:
+                pass
+        else:
+            # Admin: habilitar todo
+            self.btn_add.setEnabled(True)
+            self.btn_edit.setEnabled(True)
+            self.btn_delete.setEnabled(True)
+            self.btn_import.setEnabled(True)
+            self.btn_import_img.setEnabled(True)
+            self.btn_export_csv.setEnabled(True)
+            # Enable double-click edit for admin
+            try:
+                self.table.doubleClicked.connect(self.on_edit)
+            except:
+                pass
 
     def on_logout(self) -> None:
-        """Cierra la sesión actual y muestra el diálogo de login."""
-        ok = QMessageBox.question(self, 'Cerrar Sesión', '¿Deseas cerrar la sesión actual?')
-        if ok == QMessageBox.Yes:
-            # Signal to main.py to restart with login
-            self.logout_requested = True
-            self.close()
+        """Muestra diálogo para cambiar de usuario rápidamente."""
+        dlg = SwitchUserDialog(self.username, self)
+        if dlg.exec_() == QDialog.Accepted:
+            # Update user info
+            self.username = dlg.username
+            self.user_role = dlg.user_role
+            self._update_user_display()
+            self._apply_role_permissions()
+    
+    def _update_user_display(self) -> None:
+        """Actualiza el indicador de usuario en la toolbar."""
+        self.user_name_label.setText(self.username.capitalize())
+        # Update icon if exists
+        user_icon_path = str(Path.joinpath(self.imagePath, f'user_{self.user_role}.png'))
+        if Path(user_icon_path).exists():
+            self.user_icon_label.setPixmap(QPixmap(user_icon_path).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        # Update logout button tooltip
+        other_user = 'admin' if self.username == 'peon' else 'peon'
+        self.btn_logout.setToolTip(f'Cambiar a {other_user.capitalize()}')
 
     def on_theme_changed(self, text: str) -> None:
         if callable(self.theme_change_callback):

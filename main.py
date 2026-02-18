@@ -41,8 +41,11 @@ class SingleInstanceLock:
     
     def unlock(self):
         """Libera el lock."""
-        if self.server:
-            self.server.close()
+        if self.server and self._locked:
+            try:
+                self.server.close()
+            except RuntimeError:
+                pass  # Server already deleted by Qt
             self.server = None
         self._locked = False
 
@@ -66,36 +69,27 @@ def run() -> None:
     
     apply_light_theme(app)  # Start with light theme
     
-    while True:
-        # Show login dialog
-        login = LoginDialog()
-        if login.exec_() != 1:  # User cancelled or closed
-            instance_lock.unlock()
-            sys.exit(0)
-        
-        user_role = login.user_role
-        username = login.username
-        
-        repo = CodeRepository()
-        win = MainWindow(repo, initial_theme="Claro", home_path=Path.cwd(), user_role=user_role, username=username)
-        
-        def on_theme(text: str) -> None:
-            if text == "Oscuro":
-                apply_dark_theme(app)
-            else:
-                apply_light_theme(app)
-        
-        win.theme_change_callback = on_theme
-        win.show()
-        app.exec_()
-        
-        # Check if logout was requested
-        if not win.logout_requested:
-            break
-        # Reset theme for next login
-        apply_light_theme(app)
+    # Show login dialog
+    login = LoginDialog()
+    if login.exec_() != 1:  # User cancelled or closed
+        instance_lock.unlock()
+        sys.exit(0)
     
-    sys.exit(0)
+    user_role = login.user_role
+    username = login.username
+    
+    repo = CodeRepository()
+    win = MainWindow(repo, initial_theme="Claro", home_path=Path.cwd(), user_role=user_role, username=username)
+    
+    def on_theme(text: str) -> None:
+        if text == "Oscuro":
+            apply_dark_theme(app)
+        else:
+            apply_light_theme(app)
+    
+    win.theme_change_callback = on_theme
+    win.show()
+    sys.exit(app.exec_())
 
 if __name__ == "__main__":
     run()
