@@ -147,6 +147,7 @@ class CodeRepository:
         cur = self.conn.cursor()
         cur.execute("DELETE FROM codes")
         self.conn.commit()
+        self._refresh_duplicates()
 
     def _refresh_duplicates(self) -> None:
         cur = self.conn.cursor()

@@ -934,6 +934,22 @@ class MainWindow(QMainWindow):
             self.table_model.load()
             self._update_column_widths()
             self._update_stats()
+    # Dev Borrar todos los códigos - Ctrl+E
+    def on_deleteAll(self) -> None:
+        ok = QMessageBox.question(self, 'Confirmar', f"¿Eliminar TODOS los códigos?")
+        if ok == QMessageBox.Yes:
+            self.repo.remove_all()
+            self.table_model.load()
+            self._update_column_widths()
+            self._update_stats()
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Delete and self.btn_delete.isEnabled():
+            self.on_delete()
+        # Dev Borrar todos los códigos con Ctrl+E
+        elif event.key() == Qt.Key_E and event.modifiers() == Qt.ControlModifier:
+            self.on_deleteAll()
+        super().keyPressEvent(event)
 
     def on_filters_changed(self) -> None:
         if self.chk_anotados.isChecked() and self.chk_no_anotados.isChecked():
