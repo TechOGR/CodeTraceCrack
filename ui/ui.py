@@ -42,20 +42,19 @@ class StatusBadgeDelegate(QStyledItemDelegate):
 
 
 class AutocompleteSearchEdit(QLineEdit):
-    """Campo de búsqueda con autocompletado histórico que muestra el status."""
+    """Campo de búsqueda con autocompletado que busca por código o descripción."""
     def __init__(self, repo: CodeRepository, parent=None):
         super().__init__(parent)
         self.repo = repo
-        self.setPlaceholderText('Buscar código... (autocompletado activo)')
+        self.setPlaceholderText('Buscar por código o descripción...')
         self.completer_model = QStringListModel()
         self.completer = QCompleter(self.completer_model, self)
         self.completer.setCaseSensitivity(Qt.CaseInsensitive)
-        self.completer.setFilterMode(Qt.MatchStartsWith)
+        self.completer.setFilterMode(Qt.MatchContains)
         self.completer.setCompletionMode(QCompleter.PopupCompletion)
         self.setCompleter(self.completer)
         popup = QListView()
         popup.setSpacing(2)
-        popup.setMinimumWidth(350)
         popup.setMinimumHeight(200)
         self.completer.setPopup(popup)
         self.completer.setMaxVisibleItems(10)
@@ -70,18 +69,27 @@ class AutocompleteSearchEdit(QLineEdit):
             self.search_timer.start(150)
 
     def _update_completions(self):
-        text = self.text().strip().upper()
+        text = self.text().strip()
         if len(text) < 2:
             return None
         results = self.repo.search_codes_prefix(text, limit=15)
         items = []
         for r in results:
             status_label = STATUS_LABELS.get(r['status'], r['status'])
-            items.append(f"{r['code']}  •  {status_label}")
+            desc = r.get('description') or ''
+            if desc:
+                # Truncate description if too long
+                if len(desc) > 30:
+                    desc = desc[:27] + '...'
+                items.append(f"{r['code']}  •  {desc}  •  {status_label}")
+            else:
+                items.append(f"{r['code']}  •  {status_label}")
         self.completer_model.setStringList(items)
+        # Adjust popup width to match search input width
+        self.completer.popup().setFixedWidth(self.width())
 
     def get_clean_text(self) -> str:
-        """Retorna el texto limpio sin el status."""
+        """Retorna el texto limpio (código) sin el status ni descripción."""
         text = self.text().strip()
         if '  •  ' in text:
             return text.split('  •  ')[0]
@@ -133,22 +141,23 @@ class LoginDialog(QDialog):
         self.content_widget = QWidget()
         self.content_widget.setObjectName('DialogContent')
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(40, 35, 40, 35)
-        self.content_layout.setSpacing(16)
+        self.content_layout.setContentsMargins(40, 30, 40, 30)
+        self.content_layout.setSpacing(20)
         
         # User input with validation indicator
         user_container = QVBoxLayout()
-        user_container.setSpacing(6)
+        user_container.setSpacing(8)
         user_label = QLabel('Usuario')
         user_label.setStyleSheet('font-weight: 600; font-size: 13px;')
         user_row = QHBoxLayout()
-        user_row.setSpacing(8)
+        user_row.setSpacing(10)
         self.user_input = QLineEdit()
         self.user_input.setPlaceholderText('Ingresa tu usuario')
-        self.user_input.setFixedHeight(42)
+        self.user_input.setFixedHeight(40)
         self.user_input.setText('peon')  # Default user
         self.user_indicator = QLabel()
-        self.user_indicator.setFixedSize(24, 24)
+        self.user_indicator.setFixedSize(28, 28)
+        self.user_indicator.setAlignment(Qt.AlignCenter)
         user_row.addWidget(self.user_input)
         user_row.addWidget(self.user_indicator)
         user_container.addWidget(user_label)
@@ -157,23 +166,27 @@ class LoginDialog(QDialog):
         
         # Password input with validation indicator
         pass_container = QVBoxLayout()
-        pass_container.setSpacing(6)
+        pass_container.setSpacing(8)
         pass_label = QLabel('Contraseña')
         pass_label.setStyleSheet('font-weight: 600; font-size: 13px;')
         pass_row = QHBoxLayout()
-        pass_row.setSpacing(8)
+        pass_row.setSpacing(10)
         self.pass_input = QLineEdit()
         self.pass_input.setPlaceholderText('Ingresa tu contraseña')
         self.pass_input.setEchoMode(QLineEdit.Password)
-        self.pass_input.setFixedHeight(42)
+        self.pass_input.setFixedHeight(40)
         self.pass_input.setText('1234')  # Default password
         self.pass_indicator = QLabel()
-        self.pass_indicator.setFixedSize(24, 24)
+        self.pass_indicator.setFixedSize(28, 28)
+        self.pass_indicator.setAlignment(Qt.AlignCenter)
         pass_row.addWidget(self.pass_input)
         pass_row.addWidget(self.pass_indicator)
         pass_container.addWidget(pass_label)
         pass_container.addLayout(pass_row)
         self.content_layout.addLayout(pass_container)
+        
+        # Spacer before button
+        self.content_layout.addSpacing(8)
         
         # Login button (disabled by default until validation passes)
         self.btn_login = QPushButton('Iniciar Sesión')
@@ -185,7 +198,7 @@ class LoginDialog(QDialog):
         self.content_layout.addWidget(self.btn_login)
         
         main_layout.addWidget(self.content_widget)
-        self.setFixedSize(400, 280)
+        self.setFixedSize(420, 310)
         
         # Connect validation
         self.user_input.textChanged.connect(self._validate)
@@ -461,7 +474,7 @@ class CodesTableModel(QAbstractTableModel):
         super().__init__()
         self.repo = repo
         self.rows = []
-        self.headers = ['#', 'Código', 'Fecha', 'Estado']
+        self.headers = ['#', 'Código', 'Descripción', 'Fecha', 'Estado']
         self.annotated_filter = None
         self.search_text = None
         self.status_filter = None
@@ -491,21 +504,24 @@ class CodesTableModel(QAbstractTableModel):
             elif col == 1:
                 return row['code']
             elif col == 2:
+                return row.get('description') or ''
+            elif col == 3:
                 try:
                     dt = datetime.fromisoformat(row['created_at'])
                     return dt.strftime('%d/%m/%Y %H:%M')
                 except:
                     return row['created_at']
-            elif col == 3:
+            elif col == 4:
                 return ''
-        if role == Qt.UserRole and col == 3:
+        if role == Qt.UserRole and col == 4:
             return row.get('status', STATUS_DISPONIBLE)
         if role == Qt.TextAlignmentRole and col == 0:
             return Qt.AlignCenter
         if role == Qt.ToolTipRole:
             status = row.get('status', STATUS_DISPONIBLE)
             status_label = STATUS_LABELS.get(status, status)
-            return f"Código: {row['code']}\nEstado: {status_label}"
+            desc = row.get('description') or 'Sin descripción'
+            return f"Código: {row['code']}\nDescripción: {desc}\nEstado: {status_label}"
         return QVariant()
 
     def flags(self, index: QModelIndex):
@@ -730,15 +746,16 @@ class MainWindow(QMainWindow):
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
         self.status_delegate = StatusBadgeDelegate()
-        self.table.setItemDelegateForColumn(3, self.status_delegate)
+        self.table.setItemDelegateForColumn(4, self.status_delegate)
         hh = self.table.horizontalHeader()
         try:
             from PyQt5.QtWidgets import QHeaderView
             hh.setStretchLastSection(False)
-            hh.setSectionResizeMode(0, QHeaderView.Fixed)
-            hh.setSectionResizeMode(1, QHeaderView.Stretch)
-            hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            hh.setSectionResizeMode(3, QHeaderView.Fixed)
+            hh.setSectionResizeMode(0, QHeaderView.Fixed)      # #
+            hh.setSectionResizeMode(1, QHeaderView.Fixed)      # Código
+            hh.setSectionResizeMode(2, QHeaderView.Stretch)    # Descripción (ocupa el espacio disponible)
+            hh.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Fecha
+            hh.setSectionResizeMode(4, QHeaderView.Fixed)      # Estado
         except Exception:
             pass
         right_panel = QWidget()
@@ -746,7 +763,61 @@ class MainWindow(QMainWindow):
         right_panel.setMinimumWidth(250)
         right_panel.setMaximumWidth(350)
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setSpacing(16)
+        right_layout.setSpacing(12)
+        
+        # Vista Previa de Imagen
+        preview_title = QLabel('Vista Previa')
+        preview_title.setProperty('heading', True)
+        right_layout.addWidget(preview_title)
+        
+        # Container for image preview
+        self.preview_container = QFrame()
+        self.preview_container.setObjectName('PreviewContainer')
+        self.preview_container.setStyleSheet(f"""
+            #PreviewContainer {{
+                background: {COLORS['bg_card']};
+                border: 2px dashed {COLORS['border_dark']};
+                border-radius: 12px;
+                min-height: 180px;
+            }}
+        """)
+        preview_layout = QVBoxLayout(self.preview_container)
+        preview_layout.setContentsMargins(10, 10, 10, 10)
+        preview_layout.setAlignment(Qt.AlignCenter)
+        
+        # Image label
+        self.preview_image = QLabel()
+        self.preview_image.setAlignment(Qt.AlignCenter)
+        self.preview_image.setMinimumSize(200, 120)
+        self.preview_image.setMaximumSize(280, 140)
+        self.preview_image.setScaledContents(False)
+        self._set_preview_placeholder()
+        preview_layout.addWidget(self.preview_image)
+        
+        # Code info label (below image) - white text for dark background
+        self.preview_code_label = QLabel('')
+        self.preview_code_label.setAlignment(Qt.AlignCenter)
+        self.preview_code_label.setFixedHeight(24)
+        self.preview_code_label.setStyleSheet('font-weight: bold; font-size: 12px; padding-top: 8px; color: #ffffff;')
+        preview_layout.addWidget(self.preview_code_label)
+        
+        # Button to add/change image
+        self.btn_set_image = QPushButton('Asignar Imagen')
+        self.btn_set_image.setFixedHeight(32)
+        self.btn_set_image.setCursor(Qt.PointingHandCursor)
+        self.btn_set_image.setEnabled(False)
+        self.btn_set_image.clicked.connect(self.on_set_image)
+        preview_layout.addWidget(self.btn_set_image)
+        
+        right_layout.addWidget(self.preview_container)
+        
+        # Separator
+        sep_line = QFrame()
+        sep_line.setFrameShape(QFrame.HLine)
+        sep_line.setStyleSheet(f"color: {COLORS['border_dark']};")
+        right_layout.addWidget(sep_line)
+        
+        # Estadísticas
         stats_title = QLabel('Estadísticas')
         stats_title.setProperty('heading', True)
         right_layout.addWidget(stats_title)
@@ -758,10 +829,11 @@ class MainWindow(QMainWindow):
             stat_label.setStyleSheet(f"""
                 color: {color};
                 font-weight: bold;
-                padding: 8px 12px;
+                padding: 6px 10px;
                 background: {COLORS['bg_card']};
-                border-radius: 8px;
+                border-radius: 6px;
                 border-left: 3px solid {color};
+                font-size: 11px;
             """)
             self.stats_widgets[st] = stat_label
             self.stats_panel.addWidget(stat_label, i // 2, i % 2)
@@ -791,12 +863,15 @@ class MainWindow(QMainWindow):
         self.search.textChanged.connect(self.on_filters_changed)
         self.sort.currentTextChanged.connect(self.on_sort_changed)
         self.table.doubleClicked.connect(self.on_edit)
+        self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
         self.table_model.load()
         self._update_column_widths()
         self._update_stats()
         self.theme_toggle.setCurrentText('Claro' if initial_theme == 'Claro' else 'Oscuro')
         # Apply role-based access control
         self._apply_role_permissions()
+        # Track selected code for preview
+        self._selected_code_id = None
 
     def _toggle_max_restore(self):
         if self.isMaximized():
@@ -835,9 +910,11 @@ class MainWindow(QMainWindow):
             id_width = 55
         else:
             id_width = 65
-        self.table.setColumnWidth(0, id_width)
-        self.table.setColumnWidth(2, 140)
-        self.table.setColumnWidth(3, 110)
+        self.table.setColumnWidth(0, id_width)   # #
+        self.table.setColumnWidth(1, 110)        # Código
+        # Columna 2 (Descripción) se estira automáticamente
+        # Columna 3 (Fecha) se ajusta al contenido
+        self.table.setColumnWidth(4, 110)        # Estado
 
     def _update_stats(self):
         """Actualiza las estadísticas en el panel lateral."""
@@ -848,6 +925,93 @@ class MainWindow(QMainWindow):
             color = get_status_color(st)
             self.stats_widgets[st].setText(f'{label}: {count}')
         self.stats_label.setText(f"Total: {total} códigos  |  Editados: {stats.get('annotated', 0)}")
+    
+    def _set_preview_placeholder(self):
+        """Muestra el placeholder cuando no hay imagen."""
+        self.preview_image.setText('Imagen no disponible')
+        self.preview_image.setStyleSheet(f'''
+            color: {COLORS['text_muted']};
+            font-size: 12px;
+            font-style: italic;
+        ''')
+        if hasattr(self, 'preview_code_label'):
+            self.preview_code_label.setText('')
+        if hasattr(self, 'btn_set_image'):
+            self.btn_set_image.setText('Asignar Imagen')
+            self.btn_set_image.setEnabled(False)
+        if hasattr(self, '_selected_code_id'):
+            self._selected_code_id = None
+    
+    def _update_preview(self, row_data: dict):
+        """Actualiza la vista previa con los datos de la fila seleccionada."""
+        self._selected_code_id = row_data.get('id')
+        code = row_data.get('code', '')
+        image_path = row_data.get('image_path')
+        status = row_data.get('status', STATUS_DISPONIBLE)
+        status_label = STATUS_LABELS.get(status, status)
+        
+        # Update code label
+        self.preview_code_label.setText(f'{code} - {status_label}')
+        
+        # Enable button based on role
+        self.btn_set_image.setEnabled(self.user_role == 'admin')
+        
+        # Try to load image
+        if image_path and Path(image_path).exists():
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                scaled = pixmap.scaled(280, 135, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.preview_image.setPixmap(scaled)
+                self.preview_image.setStyleSheet('')
+                self.btn_set_image.setText('Cambiar Imagen')
+                return
+        
+        # No image available
+        self.preview_image.clear()
+        self.preview_image.setText('Sin imagen')
+        self.preview_image.setStyleSheet(f'''
+            color: {COLORS['text_muted']};
+            font-size: 12px;
+            font-style: italic;
+        ''')
+        self.btn_set_image.setText('Asignar Imagen')
+    
+    def on_selection_changed(self, selected, deselected):
+        """Maneja el cambio de selección en la tabla."""
+        indexes = selected.indexes()
+        if indexes:
+            row_idx = indexes[0].row()
+            if row_idx < len(self.table_model.rows):
+                row_data = self.table_model.rows[row_idx]
+                self._update_preview(row_data)
+        else:
+            self._set_preview_placeholder()
+    
+    def on_set_image(self):
+        """Permite al usuario asignar una imagen al código seleccionado."""
+        if self._selected_code_id is None:
+            return
+        
+        path, _ = QFileDialog.getOpenFileName(
+            self, 
+            'Seleccionar imagen del producto', 
+            '', 
+            'Images (*.png *.jpg *.jpeg *.bmp *.gif)'
+        )
+        if not path:
+            return
+        
+        # Update database
+        self.repo.update_image_path(self._selected_code_id, path)
+        
+        # Reload table and update preview
+        self.table_model.load()
+        
+        # Find and select the same row again
+        for i, row in enumerate(self.table_model.rows):
+            if row['id'] == self._selected_code_id:
+                self._update_preview(row)
+                break
 
     def on_import_file(self) -> None:
         """Importa códigos desde archivo TXT o CSV."""
@@ -897,6 +1061,7 @@ class MainWindow(QMainWindow):
     def _import_csv(self, path: Path) -> list:
         """Importa códigos desde un archivo CSV exportado por CodeTrace.
         Detecta automáticamente el delimitador (coma o punto y coma).
+        Soporta columnas: Código, Descripción, Estado, Usado, Fecha
         """
         import csv
         items = []
@@ -924,6 +1089,8 @@ class MainWindow(QMainWindow):
                 if not header:
                     return []
                 header_lower = [h.strip().lower() for h in header]
+                
+                # Find column indices
                 code_idx = None
                 for i, h in enumerate(header_lower):
                     if 'código' in h or 'codigo' in h or 'code' in h:
@@ -931,31 +1098,52 @@ class MainWindow(QMainWindow):
                         break
                 if code_idx is None:
                     code_idx = 0
+                
+                # Description column
+                desc_idx = None
+                for i, h in enumerate(header_lower):
+                    if 'descripción' in h or 'descripcion' in h or 'description' in h:
+                        desc_idx = i
+                        break
+                
                 status_idx = None
                 for i, h in enumerate(header_lower):
                     if 'estado' in h or 'status' in h:
                         status_idx = i
                         break
-                if status_idx is None:
-                    status_idx = 1
+                
                 usado_idx = None
                 for i, h in enumerate(header_lower):
                     if 'usado' in h or 'editado' in h:
                         usado_idx = i
                         break
+                
                 for row in reader:
                     if not row or len(row) <= code_idx:
                         continue
                     code = row[code_idx].strip().upper()
                     if not code or not CODE_REGEX.match(code):
                         continue
+                    
+                    # Get description
+                    description = None
+                    if desc_idx is not None and len(row) > desc_idx:
+                        desc_text = row[desc_idx].strip()
+                        if desc_text:
+                            description = desc_text
+                    
+                    # Get status
                     status_text = row[status_idx].strip().lower() if status_idx is not None and len(row) > status_idx else ''
                     status = label_to_status.get(status_text, STATUS_DISPONIBLE)
+                    
+                    # Get editado
                     editado = False
                     if usado_idx is not None and len(row) > usado_idx:
                         usado_text = row[usado_idx].strip().lower()
                         editado = usado_text in ['sí', 'si', 'yes', '1', 'true']
-                    items.append((code, editado, datetime.utcnow(), status))
+                    
+                    # Tuple: (code, annotated, created_at, status, image_path, description)
+                    items.append((code, editado, datetime.utcnow(), status, None, description))
         except Exception as e:
             QMessageBox.warning(self, 'Error CSV', f'Error al leer CSV: {e}')
             return []
@@ -1092,12 +1280,69 @@ class MainWindow(QMainWindow):
             if not s or not CODE_REGEX.match(s):
                 QMessageBox.warning(self, 'Validación', 'Código inválido. Formato: 2-5 letras + 3-9 números')
                 return None
-            existing = self.repo.codes_exist([s])
-            if existing:
-                QMessageBox.warning(self, 'Código duplicado', f'El código {s} ya existe en la base de datos.')
+            # Check if code already exists
+            existing_row = self.repo.get_code_by_code(s)
+            if existing_row:
+                existing_data = dict(existing_row)
+                current_status = existing_data.get('status', STATUS_DISPONIBLE)
+                status_label = STATUS_LABELS.get(current_status, current_status)
+                # Show dialog with options to edit or cancel
+                msg = QMessageBox(self)
+                msg.setWindowTitle('Código duplicado')
+                msg.setText(f'El código {s} ya existe.')
+                msg.setInformativeText(f'Estado actual: {status_label}\n\n¿Desea editar el estado de este código?')
+                msg.setIcon(QMessageBox.Warning)
+                btn_edit = msg.addButton('Editar', QMessageBox.AcceptRole)
+                btn_cancel = msg.addButton('Cancelar', QMessageBox.RejectRole)
+                msg.setDefaultButton(btn_cancel)
+                msg.exec_()
+                
+                if msg.clickedButton() == btn_edit:
+                    # Open edit dialog for status only
+                    self._edit_status_only(existing_data)
                 return None
             status = status_combo.currentData()
             self.repo.add_codes([(s, cb.isChecked(), datetime.utcnow(), status)])
+            self.table_model.load()
+            self._update_column_widths()
+            self._update_stats()
+    
+    def _edit_status_only(self, row_data: dict) -> None:
+        """Abre diálogo para editar solo el estado de un código existente."""
+        dlg = CodeDialog('Editar estado', self)
+        dlg.setMinimumWidth(350)
+        fl = QFormLayout()
+        fl.setSpacing(12)
+        
+        # Show code as read-only label
+        code_label = QLabel(row_data['code'])
+        code_label.setStyleSheet('font-weight: bold; font-size: 14px; padding: 8px; background: rgba(128,128,128,0.1); border-radius: 4px;')
+        
+        status_combo = QComboBox()
+        current_status = row_data.get('status', STATUS_DISPONIBLE)
+        for st in ALL_STATUSES:
+            status_combo.addItem(STATUS_LABELS[st], st)
+            if st == current_status:
+                status_combo.setCurrentIndex(status_combo.count() - 1)
+        
+        fl.addRow('Código:', code_label)
+        fl.addRow('Estado:', status_combo)
+        dlg.content_layout.addLayout(fl)
+        
+        btns = QHBoxLayout()
+        btns.setSpacing(10)
+        b_ok = QPushButton('Guardar')
+        b_cancel = QPushButton('Cancelar')
+        b_cancel.setProperty('secondary', True)
+        btns.addWidget(b_ok)
+        btns.addWidget(b_cancel)
+        dlg.content_layout.addLayout(btns)
+        b_ok.clicked.connect(dlg.accept)
+        b_cancel.clicked.connect(dlg.reject)
+        
+        if dlg.exec_() == QDialog.Accepted:
+            new_status = status_combo.currentData()
+            self.repo.update_status(row_data['id'], new_status)
             self.table_model.load()
             self._update_column_widths()
             self._update_stats()
@@ -1189,6 +1434,11 @@ class MainWindow(QMainWindow):
         self.table_model.search_text = search_text or None
         self.table_model.load()
         self._update_column_widths()
+        # Auto-select first row if search is active and results exist
+        if search_text and self.table_model.rows:
+            self.table.selectRow(0)
+        elif not self.table_model.rows:
+            self._set_preview_placeholder()
 
     def on_sort_changed(self, text: str) -> None:
         if 'Fecha ↓' in text:

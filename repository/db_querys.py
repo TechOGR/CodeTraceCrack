@@ -53,28 +53,43 @@ class CodeRepository:
                 created_at TEXT NOT NULL,
                 annotated INTEGER NOT NULL DEFAULT 0,
                 duplicate INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'disponible'
+                status TEXT NOT NULL DEFAULT 'disponible',
+                image_path TEXT DEFAULT NULL,
+                description TEXT DEFAULT NULL
             )
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_codes_code ON codes(code)")
-        # Migrar tablas existentes agregando columna status si no existe
+        # Migrar tablas existentes agregando columnas si no existen
         try:
             cur.execute("ALTER TABLE codes ADD COLUMN status TEXT NOT NULL DEFAULT 'disponible'")
         except sqlite3.OperationalError:
             pass  # La columna ya existe
+        try:
+            cur.execute("ALTER TABLE codes ADD COLUMN image_path TEXT DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
+        try:
+            cur.execute("ALTER TABLE codes ADD COLUMN description TEXT DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
         self.conn.commit()
 
-    def add_codes(self, codes: List[Tuple[str, bool, Optional[datetime], Optional[str]]]) -> None:
+    def add_codes(self, codes: List[Tuple[str, bool, Optional[datetime], Optional[str], Optional[str], Optional[str]]]) -> None:
+        """Agrega códigos a la base de datos.
+        Cada tupla: (code, annotated, created_at, status, image_path, description)
+        """
         cur = self.conn.cursor()
         for item in codes:
             code = item[0]
             annotated = item[1]
             created_at = item[2] if len(item) > 2 else None
             status = item[3] if len(item) > 3 else STATUS_DISPONIBLE
+            image_path = item[4] if len(item) > 4 else None
+            description = item[5] if len(item) > 5 else None
             cur.execute(
-                "INSERT INTO codes(code, created_at, annotated, duplicate, status) VALUES (?, ?, ?, ?, ?)",
-                (code, (created_at or datetime.utcnow()).isoformat(), int(annotated), 0, status or STATUS_DISPONIBLE),
+                "INSERT INTO codes(code, created_at, annotated, duplicate, status, image_path, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (code, (created_at or datetime.utcnow()).isoformat(), int(annotated), 0, status or STATUS_DISPONIBLE, image_path, description),
             )
         self.conn.commit()
         self._refresh_duplicates()
@@ -86,7 +101,7 @@ class CodeRepository:
                    status: Optional[str] = None,
                    order_by: str = "created_at",
                    order_dir: str = "DESC") -> List[sqlite3.Row]:
-        query = "SELECT id, code, created_at, annotated, duplicate, status FROM codes"
+        query = "SELECT id, code, created_at, annotated, duplicate, status, image_path, description FROM codes"
         conditions = []
         params: List[Any] = []
 
@@ -96,8 +111,10 @@ class CodeRepository:
         if duplicates_only:
             conditions.append("duplicate = 1")
         if search:
-            conditions.append("code LIKE ?")
+            # Buscar en código O en descripción
+            conditions.append("(code LIKE ? OR description LIKE ?)")
             params.append(f"%{search.upper()}%")
+            params.append(f"%{search}%")
         if status:
             conditions.append("status = ?")
             params.append(status)
@@ -124,18 +141,41 @@ class CodeRepository:
         cur.execute("UPDATE codes SET status = ? WHERE id = ?", (status, code_id))
         self.conn.commit()
 
-    def update_code(self, code_id: int, code: str, annotated: Optional[bool] = None, status: Optional[str] = None) -> None:
+    def update_code(self, code_id: int, code: str, annotated: Optional[bool] = None, status: Optional[str] = None, image_path: Optional[str] = None) -> None:
         cur = self.conn.cursor()
-        if annotated is None and status is None:
-            cur.execute("UPDATE codes SET code = ? WHERE id = ?", (code, code_id))
-        elif status is None:
-            cur.execute("UPDATE codes SET code = ?, annotated = ? WHERE id = ?", (code, int(annotated), code_id))
-        elif annotated is None:
-            cur.execute("UPDATE codes SET code = ?, status = ? WHERE id = ?", (code, status, code_id))
-        else:
-            cur.execute("UPDATE codes SET code = ?, annotated = ?, status = ? WHERE id = ?", (code, int(annotated), status, code_id))
+        fields = ["code = ?"]
+        params = [code]
+        if annotated is not None:
+            fields.append("annotated = ?")
+            params.append(int(annotated))
+        if status is not None:
+            fields.append("status = ?")
+            params.append(status)
+        if image_path is not None:
+            fields.append("image_path = ?")
+            params.append(image_path if image_path else None)
+        params.append(code_id)
+        cur.execute(f"UPDATE codes SET {', '.join(fields)} WHERE id = ?", params)
         self.conn.commit()
         self._refresh_duplicates()
+    
+    def update_image_path(self, code_id: int, image_path: Optional[str]) -> None:
+        """Actualiza solo la ruta de imagen de un código."""
+        cur = self.conn.cursor()
+        cur.execute("UPDATE codes SET image_path = ? WHERE id = ?", (image_path, code_id))
+        self.conn.commit()
+    
+    def get_code_by_id(self, code_id: int) -> Optional[sqlite3.Row]:
+        """Obtiene un código por su ID."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, code, created_at, annotated, duplicate, status, image_path, description FROM codes WHERE id = ?", (code_id,))
+        return cur.fetchone()
+    
+    def get_code_by_code(self, code: str) -> Optional[sqlite3.Row]:
+        """Obtiene un código por su valor de código."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, code, created_at, annotated, duplicate, status, image_path, description FROM codes WHERE code = ?", (code.upper(),))
+        return cur.fetchone()
 
     def delete_code(self, code_id: int) -> None:
         cur = self.conn.cursor()
@@ -185,13 +225,17 @@ class CodeRepository:
         return [row["code"] for row in cur.fetchall()]
 
     def search_codes_prefix(self, prefix: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Busca códigos que empiecen con el prefijo dado, retorna código y status."""
+        """Busca códigos que empiecen con el prefijo dado o contengan la descripción.
+        Retorna código, status y descripción."""
         cur = self.conn.cursor()
+        search_term = prefix.strip()
         cur.execute(
-            "SELECT DISTINCT code, status FROM codes WHERE code LIKE ? ORDER BY code LIMIT ?",
-            (f"{prefix.upper()}%", limit)
+            """SELECT DISTINCT code, status, description FROM codes 
+               WHERE code LIKE ? OR description LIKE ? 
+               ORDER BY code LIMIT ?""",
+            (f"{search_term.upper()}%", f"%{search_term}%", limit)
         )
-        return [{"code": row["code"], "status": row["status"]} for row in cur.fetchall()]
+        return [{"code": row["code"], "status": row["status"], "description": row["description"]} for row in cur.fetchall()]
 
     def codes_exist(self, codes: List[str]) -> List[str]:
         """Verifica cuáles códigos ya existen en la base de datos.

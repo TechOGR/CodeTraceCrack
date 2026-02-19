@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox
 def export_to_csv(parent, data, status_labels):
     """
     Exporta la lista de códigos y sus estados a un archivo CSV.
-    Formato: Código;Estado (compatible con importación)
+    Formato: Código;Descripción;Estado;Usado;Fecha (compatible con importación)
     
     Args:
         parent: El widget padre para los diálogos.
@@ -41,16 +41,17 @@ def export_to_csv(parent, data, status_labels):
                 writer = csv.writer(file, delimiter=';')
                 
                 # Cabecera compatible con importación
-                writer.writerow(["Código", "Estado", "Usado", "Fecha"])
+                writer.writerow(["Código", "Descripción", "Estado", "Usado", "Fecha"])
                 
                 for item in data:
                     code = item.get('code', '')
+                    description = item.get('description') or ''
                     status_id = item.get('status', 'disponible')
                     status_text = status_labels.get(status_id, "Disponible")
                     used = "Sí" if item.get('annotated') else "No"
                     fecha = item.get('created_at', '')
                     
-                    writer.writerow([code, status_text, used, fecha])
+                    writer.writerow([code, description, status_text, used, fecha])
                     
             QMessageBox.information(parent, "Exportación exitosa", f"Exportados {len(data)} códigos a:\n{file_path}")
         except Exception as e:
