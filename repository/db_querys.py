@@ -15,6 +15,60 @@ STATUS_PERDIDO = "perdido"        # Caja perdida, no se encuentra
 STATUS_NO_HAY_MAS = "no_hay_mas"  # Agotado, no hay más en stock
 
 ALL_STATUSES = [STATUS_DISPONIBLE, STATUS_PENDIENTE, STATUS_PEDIDO, STATUS_ULTIMO, STATUS_PERDIDO, STATUS_NO_HAY_MAS]
+
+def calculate_status_from_stock(stock_per_box: Optional[int], stock_boxes: Optional[int], stock_remaining: Optional[int]) -> Optional[str]:
+    """Calcula el estado automático basándose en los niveles de stock.
+    
+    Reglas:
+    - remaining < 0: STATUS_NO_HAY_MAS (sin stock)
+    - remaining < per_box AND remaining > 0: STATUS_ULTIMO (últimos productos)
+    - remaining >= per_box AND remaining >= 1.25 * per_box: STATUS_DISPONIBLE (en stock)
+    
+    Retorna None si no se puede calcular (datos insuficientes) o no cumple ninguna regla.
+    """
+    if stock_per_box is None or stock_remaining is None:
+        return None
+    
+    if stock_per_box <= 0:
+        return None
+    
+    # Stock negativo -> No hay más (SIEMPRE aplica, incluso si está editado)
+    if stock_remaining < 0:
+        return STATUS_NO_HAY_MAS
+    
+    # Menos de una caja completa pero mayor a 0 -> Último
+    if stock_remaining < stock_per_box and stock_remaining > 0:
+        return STATUS_ULTIMO
+    
+    # Una caja completa o más Y total >= 1.25 cajas -> Disponible
+    threshold = stock_per_box * 1.25
+    if stock_remaining >= stock_per_box and stock_remaining >= threshold:
+        return STATUS_DISPONIBLE
+    
+    return None
+
+
+def should_auto_update_status(is_annotated: bool, current_status: Optional[str], new_status: Optional[str]) -> bool:
+    """Determina si se debe auto-actualizar el estado.
+    
+    Reglas:
+    - Si new_status es None, no actualizar
+    - Si new_status es NO_HAY_MAS, SIEMPRE actualizar (sin importar si está editado)
+    - Si está editado (annotated=True), NO actualizar (excepto NO_HAY_MAS)
+    - Si no está editado, actualizar
+    """
+    if new_status is None:
+        return False
+    
+    # NO_HAY_MAS siempre se aplica (stock negativo es crítico)
+    if new_status == STATUS_NO_HAY_MAS:
+        return True
+    
+    # Si está editado, no auto-actualizar
+    if is_annotated:
+        return False
+    
+    return True
 STATUS_LABELS = {
     STATUS_DISPONIBLE: "Disponible",
     STATUS_PENDIENTE: "Pendiente",
@@ -90,9 +144,12 @@ class CodeRepository:
             pass  # La columna ya existe
         self.conn.commit()
 
-    def add_codes(self, codes: List[Tuple]) -> None:
+    def add_codes(self, codes: List[Tuple], auto_calc_status: bool = True) -> None:
         """Agrega códigos a la base de datos.
         Cada tupla: (code, annotated, created_at, status, image_path, description, stock_per_box, stock_boxes, stock_remaining)
+        
+        Si auto_calc_status es True, calcula el estado automáticamente basado en stock
+        para códigos no editados (o siempre para NO_HAY_MAS).
         """
         cur = self.conn.cursor()
         for item in codes:
@@ -105,6 +162,13 @@ class CodeRepository:
             stock_per_box = item[6] if len(item) > 6 else None
             stock_boxes = item[7] if len(item) > 7 else None
             stock_remaining = item[8] if len(item) > 8 else None
+            
+            # Auto-calcular status basado en stock
+            if auto_calc_status:
+                calculated_status = calculate_status_from_stock(stock_per_box, stock_boxes, stock_remaining)
+                if should_auto_update_status(annotated, status, calculated_status):
+                    status = calculated_status
+            
             cur.execute(
                 "INSERT INTO codes(code, created_at, annotated, duplicate, status, image_path, description, stock_per_box, stock_boxes, stock_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (code, (created_at or datetime.utcnow()).isoformat(), int(annotated), 0, status or STATUS_DISPONIBLE, image_path, description, stock_per_box, stock_boxes, stock_remaining),
@@ -195,11 +259,33 @@ class CodeRepository:
         cur.execute("SELECT id, code, created_at, annotated, duplicate, status, image_path, description, stock_per_box, stock_boxes, stock_remaining FROM codes WHERE code = ?", (code.upper(),))
         return cur.fetchone()
     
-    def update_stock(self, code_id: int, stock_per_box: Optional[int], stock_boxes: Optional[int], stock_remaining: Optional[int]) -> None:
-        """Actualiza los datos de stock de un código."""
+    def update_stock(self, code_id: int, stock_per_box: Optional[int], stock_boxes: Optional[int], stock_remaining: Optional[int], auto_update_status: bool = True) -> None:
+        """Actualiza los datos de stock de un código.
+        
+        Si auto_update_status es True, también actualiza el estado automáticamente
+        basándose en los niveles de stock (respetando si está editado o no).
+        """
         cur = self.conn.cursor()
+        
+        # Obtener estado actual del código
+        cur.execute("SELECT annotated, status FROM codes WHERE id = ?", (code_id,))
+        row = cur.fetchone()
+        if not row:
+            return
+        
+        is_annotated = bool(row[0])
+        current_status = row[1]
+        
+        # Actualizar stock
         cur.execute("UPDATE codes SET stock_per_box = ?, stock_boxes = ?, stock_remaining = ? WHERE id = ?", 
                     (stock_per_box, stock_boxes, stock_remaining, code_id))
+        
+        # Auto-actualizar estado basándose en stock (respetando reglas de editado)
+        if auto_update_status:
+            new_status = calculate_status_from_stock(stock_per_box, stock_boxes, stock_remaining)
+            if should_auto_update_status(is_annotated, current_status, new_status):
+                cur.execute("UPDATE codes SET status = ? WHERE id = ?", (new_status, code_id))
+        
         self.conn.commit()
 
     def delete_code(self, code_id: int) -> None:
@@ -299,3 +385,33 @@ class CodeRepository:
         )
         self.conn.commit()
         return cur.rowcount > 0
+    
+    def recalculate_all_statuses(self) -> int:
+        """Recalcula el estado de TODOS los códigos basándose en su stock.
+        
+        Respeta las reglas:
+        - NO_HAY_MAS siempre se aplica (stock negativo es crítico)
+        - Para otros estados, solo actualiza si no está editado (annotated=0)
+        
+        Retorna el número de códigos actualizados.
+        """
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, annotated, status, stock_per_box, stock_boxes, stock_remaining FROM codes")
+        rows = cur.fetchall()
+        
+        updated = 0
+        for row in rows:
+            code_id = row[0]
+            is_annotated = bool(row[1])
+            current_status = row[2]
+            stock_per_box = row[3]
+            stock_boxes = row[4]
+            stock_remaining = row[5]
+            
+            new_status = calculate_status_from_stock(stock_per_box, stock_boxes, stock_remaining)
+            if should_auto_update_status(is_annotated, current_status, new_status):
+                cur.execute("UPDATE codes SET status = ? WHERE id = ?", (new_status, code_id))
+                updated += 1
+        
+        self.conn.commit()
+        return updated

@@ -79,6 +79,10 @@ def run() -> None:
     username = login.username
     
     repo = CodeRepository()
+    
+    # Recalcular estados automáticamente basándose en stock al iniciar
+    repo.recalculate_all_statuses()
+    
     win = MainWindow(repo, initial_theme="Claro", home_path=Path.cwd(), user_role=user_role, username=username)
     
     def on_theme(text: str) -> None:

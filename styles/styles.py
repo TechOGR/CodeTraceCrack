@@ -91,7 +91,9 @@ def apply_dark_theme(app: QApplication) -> None:
         
         #CloseButton {{
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 {COLORS["warning"]}, stop:1 {COLORS["error"]});
+                stop:0 {COLORS["gradient_start"]}, 
+                stop:0.5 {COLORS["gradient_mid"]}, 
+                stop:1 {COLORS["gradient_end"]});
             border: none;
             border-radius: 0px;
             min-width: 60px;
@@ -598,7 +600,9 @@ def apply_light_theme(app: QApplication) -> None:
         
         #CloseButton {{
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 {LIGHT["warning"]}, stop:1 {LIGHT["error"]});
+                stop:0 {LIGHT["accent_dark"]}, 
+                stop:0.5 {LIGHT["accent_primary"]}, 
+                stop:1 {LIGHT["accent_light"]});
             border: none;
             border-radius: 0px;
             min-width: 60px;

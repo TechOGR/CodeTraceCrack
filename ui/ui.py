@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTab
 from PyQt5.QtGui import QPixmap, QIcon, QColor, QPainter, QBrush, QPen, QFont
 from pathlib import Path
 from datetime import datetime
-from repository.db_querys import CodeRepository, STATUS_LABELS, ALL_STATUSES, STATUS_DISPONIBLE, STATUS_PENDIENTE, STATUS_PEDIDO, STATUS_PERDIDO, STATUS_NO_HAY_MAS, STATUS_ULTIMO
+from repository.db_querys import CodeRepository, STATUS_LABELS, ALL_STATUSES, STATUS_DISPONIBLE, STATUS_PENDIENTE, STATUS_PEDIDO, STATUS_PERDIDO, STATUS_NO_HAY_MAS, STATUS_ULTIMO, calculate_status_from_stock
 from modules.export_utils import export_to_csv
 from styles.styles import get_status_color, COLORS
 
@@ -38,6 +38,102 @@ class StatusBadgeDelegate(QStyledItemDelegate):
             painter.restore()
         else:
             super().paint(painter, option, index)
+
+
+class StockDelegate(QStyledItemDelegate):
+    """Delegate para mostrar el stock con colores: azul para total, verde/rojo para restante."""
+    
+    # Colores
+    COLOR_TOTAL = "#3b82f6"      # Azul para cantidad total (cajas)
+    COLOR_REMAINING_OK = "#22c55e"   # Verde para stock bueno (>30%)
+    COLOR_REMAINING_LOW = "#f59e0b"  # Naranja para stock bajo (10-30%)
+    COLOR_REMAINING_CRITICAL = "#ef4444"  # Rojo para stock crítico (<10%)
+    COLOR_SEPARATOR = "#64748b"  # Gris para el separador
+    
+    def paint(self, painter: QPainter, option, index: QModelIndex):
+        # Obtener datos de stock del UserRole
+        stock_data = index.data(Qt.UserRole + 1)  # Usamos UserRole+1 para stock
+        
+        if not stock_data:
+            # Si no hay datos, dibujar normalmente
+            super().paint(painter, option, index)
+            return
+        
+        per_box, boxes, remaining = stock_data
+        
+        if per_box is None or boxes is None:
+            super().paint(painter, option, index)
+            return
+        
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Calcular el total y cajas restantes
+        total = per_box * boxes
+        if remaining is None:
+            remaining = total
+        
+        if per_box > 0:
+            remaining_boxes = remaining / per_box
+            if remaining_boxes == int(remaining_boxes):
+                remaining_boxes_str = str(int(remaining_boxes))
+            else:
+                remaining_boxes_str = f"{remaining_boxes:.1f}"
+        else:
+            remaining_boxes_str = "0"
+            remaining_boxes = 0
+        
+        # Determinar color del restante según porcentaje
+        if total > 0:
+            percentage = (remaining / total) * 100
+            if percentage > 30:
+                remaining_color = self.COLOR_REMAINING_OK
+            elif percentage > 10:
+                remaining_color = self.COLOR_REMAINING_LOW
+            else:
+                remaining_color = self.COLOR_REMAINING_CRITICAL
+        else:
+            remaining_color = self.COLOR_REMAINING_OK
+        
+        # Preparar textos
+        total_text = f"{per_box}({boxes})"
+        remaining_text = f"{remaining}({remaining_boxes_str})"
+        separator = " | "
+        
+        # Configurar fuente
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(9)
+        painter.setFont(font)
+        
+        # Calcular anchos de texto
+        fm = painter.fontMetrics()
+        total_width = fm.horizontalAdvance(total_text)
+        sep_width = fm.horizontalAdvance(separator)
+        remaining_width = fm.horizontalAdvance(remaining_text)
+        full_width = total_width + sep_width + remaining_width
+        
+        # Posición centrada
+        rect = option.rect
+        start_x = rect.x() + (rect.width() - full_width) // 2
+        y = rect.y() + (rect.height() + fm.ascent() - fm.descent()) // 2
+        
+        # Dibujar texto del total (azul)
+        painter.setPen(QPen(QColor(self.COLOR_TOTAL)))
+        painter.drawText(start_x, y, total_text)
+        
+        # Dibujar separador (gris)
+        painter.setPen(QPen(QColor(self.COLOR_SEPARATOR)))
+        painter.drawText(start_x + total_width, y, separator)
+        
+        # Dibujar texto restante (color según porcentaje)
+        painter.setPen(QPen(QColor(remaining_color)))
+        painter.drawText(start_x + total_width + sep_width, y, remaining_text)
+        
+        painter.restore()
+    
+    def sizeHint(self, option, index):
+        return QSize(160, option.rect.height())
 
 
 class AutocompleteSearchEdit(QLineEdit):
@@ -98,7 +194,7 @@ class AutocompleteSearchEdit(QLineEdit):
 class LoginDialog(QDialog):
     """Diálogo de login con usuario y contraseña con validación en tiempo real."""
     USERS = {
-        'peon': ('1234', 'peon'),
+        'user': ('1234', 'user'),
         'admin': ('admin', 'admin')
     }
     
@@ -153,7 +249,7 @@ class LoginDialog(QDialog):
         self.user_input = QLineEdit()
         self.user_input.setPlaceholderText('Ingresa tu usuario')
         self.user_input.setFixedHeight(40)
-        self.user_input.setText('peon')  # Default user
+        self.user_input.setText('user')  # Default user
         self.user_indicator = QLabel()
         self.user_indicator.setFixedSize(28, 28)
         self.user_indicator.setAlignment(Qt.AlignCenter)
@@ -299,7 +395,7 @@ class SwitchUserDialog(QDialog):
         self._old_pos = None
         self.current_user = current_user
         # Get the other user
-        self.target_user = 'admin' if current_user == 'peon' else 'peon'
+        self.target_user = 'admin' if current_user == 'user' else 'user'
         self.user_role = None
         self.username = None
         
@@ -592,7 +688,7 @@ class HelpDialog(QDialog):
         content_layout.setSpacing(16)
         
         # App info
-        app_title = QLabel('CodeTrace v1.0')
+        app_title = QLabel('CodeTrace v1.5.3')
         app_title.setStyleSheet('font-size: 20px; font-weight: bold;')
         content_layout.addWidget(app_title)
         
@@ -638,7 +734,7 @@ class HelpDialog(QDialog):
         roles_title.setStyleSheet('font-size: 15px; font-weight: bold; margin-top: 5px;')
         content_layout.addWidget(roles_title)
         
-        roles_text = QLabel('• Admin: Acceso completo a todas las funciones\n• Peon: Solo puede visualizar y buscar códigos')
+        roles_text = QLabel('• Admin: Acceso completo a todas las funciones\n• user: Solo puede visualizar y buscar códigos')
         roles_text.setStyleSheet('font-size: 12px;')
         content_layout.addWidget(roles_text)
         
@@ -722,7 +818,7 @@ class DeveloperInfoDialog(QDialog):
         dev_name.setStyleSheet('font-size: 13px; color: gray;')
         content_layout.addWidget(dev_name)
         
-        name_label = QLabel('OnelCrack')
+        name_label = QLabel('Onel Guilarte')
         name_label.setStyleSheet('font-size: 22px; font-weight: bold;')
         content_layout.addWidget(name_label)
         
@@ -758,15 +854,15 @@ class DeveloperInfoDialog(QDialog):
         # Email
         content_layout.addLayout(create_link_row(
             'email_icon.png',
-            'onelcrackyt@gmail.com',
-            'mailto:onelcrackyt@gmail.com'
+            'guilarteonel@gmail.com',
+            'mailto:guilarteonel@gmail.com'
         ))
         
         # GitHub
         content_layout.addLayout(create_link_row(
             'github_icon.png',
-            'OnelCrack',
-            'https://github.com/OnelCrack'
+            'TechOGR',
+            'https://github.com/TechOGR'
         ))
         
         # YouTube
@@ -780,13 +876,13 @@ class DeveloperInfoDialog(QDialog):
         content_layout.addLayout(create_link_row(
             'website_icon.png',
             'onelcrack.com',
-            'https://onelcrack.com'
+            'https://onelcrack.vercel.app'
         ))
         
         content_layout.addStretch()
         
         # Footer
-        footer = QLabel('© 2024 OnelCrack - Todos los derechos reservados')
+        footer = QLabel('© 2026 OnelCrack - Todos los derechos reservados')
         footer.setStyleSheet('font-size: 11px; color: gray; margin-top: 15px;')
         footer.setAlignment(Qt.AlignCenter)
         content_layout.addWidget(footer)
@@ -886,6 +982,7 @@ class CodesTableModel(QAbstractTableModel):
             elif col == 2:
                 return row.get('description') or ''
             elif col == 3:
+                # El delegate se encarga de renderizar, pero retornamos texto para fallback
                 return self._format_stock(row)
             elif col == 4:
                 try:
@@ -897,6 +994,14 @@ class CodesTableModel(QAbstractTableModel):
                 return ''
         if role == Qt.UserRole and col == 5:
             return row.get('status', STATUS_DISPONIBLE)
+        # Pasar datos de stock al StockDelegate
+        if role == Qt.UserRole + 1 and col == 3:
+            per_box = row.get('stock_per_box')
+            boxes = row.get('stock_boxes')
+            remaining = row.get('stock_remaining')
+            if per_box is not None and boxes is not None:
+                return (per_box, boxes, remaining)
+            return None
         if role == Qt.TextAlignmentRole and col == 0:
             return Qt.AlignCenter
         if role == Qt.TextAlignmentRole and col == 3:
@@ -921,7 +1026,7 @@ class CodesTableModel(QAbstractTableModel):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, repo: CodeRepository, home_path, initial_theme: str='Claro', user_role: str='peon', username: str='peon') -> None:
+    def __init__(self, repo: CodeRepository, home_path, initial_theme: str='Claro', user_role: str='user', username: str='user') -> None:
         super().__init__()
         self.repo = repo
         self.theme_change_callback = None
@@ -1070,7 +1175,8 @@ class MainWindow(QMainWindow):
         ''')
         toolbar.addWidget(self.btn_help)
         
-        self.btn_dev_info = QPushButton('👤')
+        self.btn_dev_info = QPushButton('')
+        self.btn_dev_info.setIcon(QIcon(f'{actions_path}/user_icon.png'))
         self.btn_dev_info.setObjectName('CircularDevButton')
         self.btn_dev_info.setFixedSize(32, 32)
         self.btn_dev_info.setCursor(Qt.PointingHandCursor)
@@ -1105,8 +1211,9 @@ class MainWindow(QMainWindow):
         self.user_name_label.setStyleSheet('font-weight: bold; font-size: 13px;')
         user_layout.addWidget(self.user_name_label)
         # Logout button (switch user)
-        other_user = 'admin' if self.username == 'peon' else 'peon'
-        self.btn_logout = QPushButton('⇄')
+        other_user = 'admin' if self.username == 'user' else 'user'
+        self.btn_logout = QPushButton('')
+        self.btn_logout.setIcon(QIcon(f'{actions_path}/switch_user.png'))
         self.btn_logout.setObjectName('LogoutButton')
         self.btn_logout.setFixedSize(24, 24)
         self.btn_logout.setCursor(Qt.PointingHandCursor)
@@ -1175,6 +1282,8 @@ class MainWindow(QMainWindow):
         self.table.verticalHeader().setVisible(False)
         self.status_delegate = StatusBadgeDelegate()
         self.table.setItemDelegateForColumn(5, self.status_delegate)
+        self.stock_delegate = StockDelegate()
+        self.table.setItemDelegateForColumn(3, self.stock_delegate)
         hh = self.table.horizontalHeader()
         try:
             from PyQt5.QtWidgets import QHeaderView
@@ -1429,7 +1538,7 @@ class MainWindow(QMainWindow):
             dlg.exec_()
             return
         
-        # No image - only admin can assign (button should be disabled for peon)
+        # No image - only admin can assign (button should be disabled for user)
         if self.user_role != 'admin':
             return
         
@@ -1667,14 +1776,14 @@ class MainWindow(QMainWindow):
 
     def _apply_role_permissions(self) -> None:
         """Aplica permisos según el rol del usuario."""
-        if self.user_role == 'peon':
-            # Peon: solo puede buscar y ver, no puede modificar nada
+        if self.user_role == 'user':
+            # user: solo puede buscar y ver, no puede modificar nada
             self.btn_add.setEnabled(False)
             self.btn_edit.setEnabled(False)
             self.btn_delete.setEnabled(False)
             self.btn_import.setEnabled(False)
             self.btn_export_csv.setEnabled(False)
-            # Disable double-click edit for peon
+            # Disable double-click edit for user
             try:
                 self.table.doubleClicked.disconnect(self.on_edit)
             except:
@@ -1710,7 +1819,7 @@ class MainWindow(QMainWindow):
         if Path(user_icon_path).exists():
             self.user_icon_label.setPixmap(QPixmap(user_icon_path).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         # Update logout button tooltip
-        other_user = 'admin' if self.username == 'peon' else 'peon'
+        other_user = 'admin' if self.username == 'user' else 'user'
         self.btn_logout.setToolTip(f'Cambiar a {other_user.capitalize()}')
 
     def on_theme_changed(self, text: str) -> None:
@@ -1781,6 +1890,61 @@ class MainWindow(QMainWindow):
             self._update_column_widths()
             self._update_stats()
     
+    def _validate_status_change(self, row_data: dict, new_status: str) -> bool:
+        """Valida si el cambio de estado es coherente con el stock.
+        
+        Si el estado seleccionado no corresponde al stock, muestra advertencia.
+        Retorna True si se debe proceder con el cambio, False si se cancela.
+        """
+        stock_per_box = row_data.get('stock_per_box')
+        stock_boxes = row_data.get('stock_boxes')
+        stock_remaining = row_data.get('stock_remaining')
+        current_status = row_data.get('status', STATUS_DISPONIBLE)
+        
+        # Si no hay datos de stock, permitir el cambio sin advertencia
+        if stock_per_box is None or stock_remaining is None:
+            return True
+        
+        # Calcular el estado que corresponde según el stock
+        recommended_status = calculate_status_from_stock(stock_per_box, stock_boxes, stock_remaining)
+        
+        # Si el estado nuevo coincide con el recomendado, o no hay recomendación, permitir
+        if recommended_status is None or new_status == recommended_status:
+            return True
+        
+        # Si el estado nuevo es diferente al recomendado, mostrar advertencia
+        recommended_label = STATUS_LABELS.get(recommended_status, recommended_status)
+        new_label = STATUS_LABELS.get(new_status, new_status)
+        
+        # Calcular información de stock para mostrar
+        total = stock_per_box * (stock_boxes or 0)
+        if stock_per_box > 0:
+            remaining_boxes = stock_remaining / stock_per_box
+            if remaining_boxes == int(remaining_boxes):
+                remaining_boxes_str = str(int(remaining_boxes))
+            else:
+                remaining_boxes_str = f"{remaining_boxes:.1f}"
+        else:
+            remaining_boxes_str = "0"
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle('Confirmar cambio de estado')
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(f'El estado seleccionado no corresponde al stock actual.')
+        msg.setInformativeText(
+            f"Stock actual: {stock_remaining} unidades ({remaining_boxes_str} cajas)\n"
+            f"Stock por caja: {stock_per_box} unidades\n\n"
+            f"Estado recomendado: {recommended_label}\n"
+            f"Estado seleccionado: {new_label}\n\n"
+            f"¿Está seguro de cambiar el estado a '{new_label}'?"
+        )
+        btn_yes = msg.addButton('Sí, cambiar', QMessageBox.AcceptRole)
+        btn_no = msg.addButton('Cancelar', QMessageBox.RejectRole)
+        msg.setDefaultButton(btn_no)
+        msg.exec_()
+        
+        return msg.clickedButton() == btn_yes
+
     def _edit_status_only(self, row_data: dict) -> None:
         """Abre diálogo para editar solo el estado de un código existente."""
         dlg = CodeDialog('Editar estado', self)
@@ -1816,6 +1980,11 @@ class MainWindow(QMainWindow):
         
         if dlg.exec_() == QDialog.Accepted:
             new_status = status_combo.currentData()
+            
+            # Validar cambio de estado
+            if not self._validate_status_change(row_data, new_status):
+                return
+            
             self.repo.update_status(row_data['id'], new_status)
             self.table_model.load()
             self._update_column_widths()
@@ -1859,8 +2028,14 @@ class MainWindow(QMainWindow):
             if not s or not CODE_REGEX.match(s):
                 QMessageBox.warning(self, 'Validación', 'Código inválido. Formato: 2-5 letras + 3-9 números')
                 return None
-            status = status_combo.currentData()
-            self.repo.update_code(row['id'], s, cb.isChecked(), status)
+            new_status = status_combo.currentData()
+            
+            # Validar cambio de estado si es diferente al actual
+            if new_status != current_status:
+                if not self._validate_status_change(row, new_status):
+                    return
+            
+            self.repo.update_code(row['id'], s, cb.isChecked(), new_status)
             self.table_model.load()
             self._update_column_widths()
             self._update_stats()
