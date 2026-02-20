@@ -55,7 +55,10 @@ class CodeRepository:
                 duplicate INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'disponible',
                 image_path TEXT DEFAULT NULL,
-                description TEXT DEFAULT NULL
+                description TEXT DEFAULT NULL,
+                stock_per_box INTEGER DEFAULT NULL,
+                stock_boxes INTEGER DEFAULT NULL,
+                stock_remaining INTEGER DEFAULT NULL
             )
             """
         )
@@ -73,11 +76,23 @@ class CodeRepository:
             cur.execute("ALTER TABLE codes ADD COLUMN description TEXT DEFAULT NULL")
         except sqlite3.OperationalError:
             pass  # La columna ya existe
+        try:
+            cur.execute("ALTER TABLE codes ADD COLUMN stock_per_box INTEGER DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
+        try:
+            cur.execute("ALTER TABLE codes ADD COLUMN stock_boxes INTEGER DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
+        try:
+            cur.execute("ALTER TABLE codes ADD COLUMN stock_remaining INTEGER DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
         self.conn.commit()
 
-    def add_codes(self, codes: List[Tuple[str, bool, Optional[datetime], Optional[str], Optional[str], Optional[str]]]) -> None:
+    def add_codes(self, codes: List[Tuple]) -> None:
         """Agrega códigos a la base de datos.
-        Cada tupla: (code, annotated, created_at, status, image_path, description)
+        Cada tupla: (code, annotated, created_at, status, image_path, description, stock_per_box, stock_boxes, stock_remaining)
         """
         cur = self.conn.cursor()
         for item in codes:
@@ -87,9 +102,12 @@ class CodeRepository:
             status = item[3] if len(item) > 3 else STATUS_DISPONIBLE
             image_path = item[4] if len(item) > 4 else None
             description = item[5] if len(item) > 5 else None
+            stock_per_box = item[6] if len(item) > 6 else None
+            stock_boxes = item[7] if len(item) > 7 else None
+            stock_remaining = item[8] if len(item) > 8 else None
             cur.execute(
-                "INSERT INTO codes(code, created_at, annotated, duplicate, status, image_path, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (code, (created_at or datetime.utcnow()).isoformat(), int(annotated), 0, status or STATUS_DISPONIBLE, image_path, description),
+                "INSERT INTO codes(code, created_at, annotated, duplicate, status, image_path, description, stock_per_box, stock_boxes, stock_remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (code, (created_at or datetime.utcnow()).isoformat(), int(annotated), 0, status or STATUS_DISPONIBLE, image_path, description, stock_per_box, stock_boxes, stock_remaining),
             )
         self.conn.commit()
         self._refresh_duplicates()
@@ -101,7 +119,7 @@ class CodeRepository:
                    status: Optional[str] = None,
                    order_by: str = "created_at",
                    order_dir: str = "DESC") -> List[sqlite3.Row]:
-        query = "SELECT id, code, created_at, annotated, duplicate, status, image_path, description FROM codes"
+        query = "SELECT id, code, created_at, annotated, duplicate, status, image_path, description, stock_per_box, stock_boxes, stock_remaining FROM codes"
         conditions = []
         params: List[Any] = []
 
@@ -168,14 +186,21 @@ class CodeRepository:
     def get_code_by_id(self, code_id: int) -> Optional[sqlite3.Row]:
         """Obtiene un código por su ID."""
         cur = self.conn.cursor()
-        cur.execute("SELECT id, code, created_at, annotated, duplicate, status, image_path, description FROM codes WHERE id = ?", (code_id,))
+        cur.execute("SELECT id, code, created_at, annotated, duplicate, status, image_path, description, stock_per_box, stock_boxes, stock_remaining FROM codes WHERE id = ?", (code_id,))
         return cur.fetchone()
     
     def get_code_by_code(self, code: str) -> Optional[sqlite3.Row]:
         """Obtiene un código por su valor de código."""
         cur = self.conn.cursor()
-        cur.execute("SELECT id, code, created_at, annotated, duplicate, status, image_path, description FROM codes WHERE code = ?", (code.upper(),))
+        cur.execute("SELECT id, code, created_at, annotated, duplicate, status, image_path, description, stock_per_box, stock_boxes, stock_remaining FROM codes WHERE code = ?", (code.upper(),))
         return cur.fetchone()
+    
+    def update_stock(self, code_id: int, stock_per_box: Optional[int], stock_boxes: Optional[int], stock_remaining: Optional[int]) -> None:
+        """Actualiza los datos de stock de un código."""
+        cur = self.conn.cursor()
+        cur.execute("UPDATE codes SET stock_per_box = ?, stock_boxes = ?, stock_remaining = ? WHERE id = ?", 
+                    (stock_per_box, stock_boxes, stock_remaining, code_id))
+        self.conn.commit()
 
     def delete_code(self, code_id: int) -> None:
         cur = self.conn.cursor()

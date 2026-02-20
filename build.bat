@@ -39,17 +39,19 @@ if exist "CodeTrace.spec" del /f "CodeTrace.spec"
 
 echo [2/3] Compilando ejecutable con PyInstaller (Python 3.8)...
 echo.
+echo Incluyendo recursos: images, styles
+echo.
 
 :: Verificar que existe el icono (PNG o ICO)
-if exist "images\logo_app.ico" (
-    python -m PyInstaller main.py -w --onefile --icon images\logo_app.ico -n CodeTrace
-) else if exist "images\logo_app.png" (
+if exist "images\\logo_app.ico" (
+    python -m PyInstaller main.py -w --onefile --icon images\\logo_app.ico -n CodeTrace --add-data "images;images" --add-data "styles;styles"
+) else if exist "images\\logo_app.png" (
     echo Usando logo_app.png como icono...
-    python -m PyInstaller main.py -w --onefile --icon images\logo_app.png -n CodeTrace
+    python -m PyInstaller main.py -w --onefile --icon images\\logo_app.png -n CodeTrace --add-data "images;images" --add-data "styles;styles"
 ) else (
     echo ADVERTENCIA: No se encontro icono
     echo Compilando sin icono...
-    python -m PyInstaller main.py -w --onefile -n CodeTrace
+    python -m PyInstaller main.py -w --onefile -n CodeTrace --add-data "images;images" --add-data "styles;styles"
 )
 
 :: Verificar que se creo el ejecutable

@@ -339,6 +339,18 @@ def apply_dark_theme(app: QApplication) -> None:
             padding: 12px;
         }}
         
+        /* === PREVIEW CONTAINER === */
+        #PreviewContainer {{
+            background: {COLORS["bg_card"]};
+            border: 2px dashed {COLORS["border_dark"]};
+            border-radius: 12px;
+        }}
+        
+        /* === STAT LABELS === */
+        #StatLabel {{
+            background: {COLORS["bg_light"]};
+        }}
+        
         /* === SPLITTER === */
         QSplitter::handle {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -835,13 +847,22 @@ def apply_light_theme(app: QApplication) -> None:
         
         /* === STATS PANEL === */
         #StatsPanel {{
-            background: {LIGHT["bg_tertiary"]};
+            background: {LIGHT["bg_secondary"]};
+            border: 1px solid {LIGHT["border_light"]};
             border-radius: 12px;
-            padding: 12px;
         }}
         
-        #StatsPanel QLabel {{
-            color: {LIGHT["text_primary"]};
+        /* === PREVIEW CONTAINER === */
+        #PreviewContainer {{
+            background: {LIGHT["bg_tertiary"]};
+            border: 2px dashed {LIGHT["border_medium"]};
+            border-radius: 12px;
+        }}
+        
+        /* === STAT LABELS === */
+        #StatLabel {{
+            background: {LIGHT["bg_secondary"]};
+            border: 1px solid {LIGHT["border_light"]};
         }}
         
         /* === SPLITTER === */

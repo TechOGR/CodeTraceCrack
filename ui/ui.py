@@ -10,7 +10,6 @@ from PyQt5.QtGui import QPixmap, QIcon, QColor, QPainter, QBrush, QPen, QFont
 from pathlib import Path
 from datetime import datetime
 from repository.db_querys import CodeRepository, STATUS_LABELS, ALL_STATUSES, STATUS_DISPONIBLE, STATUS_PENDIENTE, STATUS_PEDIDO, STATUS_PERDIDO, STATUS_NO_HAY_MAS, STATUS_ULTIMO
-from modules.ocr import extract_codes_from_image
 from modules.export_utils import export_to_csv
 from styles.styles import get_status_color, COLORS
 
@@ -469,12 +468,359 @@ class CodeDialog(QDialog):
         self._old_pos = None
 
 
+class ImagePreviewDialog(QDialog):
+    """Diálogo para mostrar imagen en tamaño grande."""
+    def __init__(self, image_path: str, code: str, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setObjectName('CodeDialog')
+        self._old_pos = None
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Title bar
+        self.title_bar = QWidget()
+        self.title_bar.setObjectName('DialogTitleBar')
+        self.title_bar.setFixedHeight(36)
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(8)
+        
+        self.btn_close = QPushButton('×')
+        self.btn_close.setObjectName('DialogCloseButton')
+        self.btn_close.setFixedSize(36, 36)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.clicked.connect(self.reject)
+        title_layout.addWidget(self.btn_close)
+        
+        self.title_label = QLabel(f'Vista Previa - {code}')
+        self.title_label.setObjectName('DialogTitleLabel')
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        main_layout.addWidget(self.title_bar)
+        
+        # Content
+        content = QWidget()
+        content.setObjectName('DialogContent')
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setAlignment(Qt.AlignCenter)
+        
+        # Image
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        if image_path and Path(image_path).exists():
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                # Scale to fit max 600x400 while keeping aspect ratio
+                scaled = pixmap.scaled(600, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.image_label.setPixmap(scaled)
+            else:
+                self.image_label.setText('Error al cargar imagen')
+        else:
+            self.image_label.setText('Imagen no disponible')
+        
+        content_layout.addWidget(self.image_label)
+        main_layout.addWidget(content)
+        
+        # Adjust dialog size based on image
+        self.adjustSize()
+        self.setMinimumSize(400, 300)
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.title_bar.geometry().contains(event.pos()):
+            self._old_pos = event.globalPos()
+    
+    def mouseMoveEvent(self, event):
+        if self._old_pos is not None:
+            delta = QPoint(event.globalPos() - self._old_pos)
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self._old_pos = event.globalPos()
+    
+    def mouseReleaseEvent(self, event):
+        self._old_pos = None
+
+
+class HelpDialog(QDialog):
+    """Diálogo de ayuda e información de la aplicación."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setObjectName('CodeDialog')
+        self._old_pos = None
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Title bar
+        self.title_bar = QWidget()
+        self.title_bar.setObjectName('DialogTitleBar')
+        self.title_bar.setFixedHeight(36)
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(8)
+        
+        self.btn_close = QPushButton('×')
+        self.btn_close.setObjectName('DialogCloseButton')
+        self.btn_close.setFixedSize(36, 36)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.clicked.connect(self.reject)
+        title_layout.addWidget(self.btn_close)
+        
+        self.title_label = QLabel('Ayuda - CodeTrace')
+        self.title_label.setObjectName('DialogTitleLabel')
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        main_layout.addWidget(self.title_bar)
+        
+        # Content
+        content = QWidget()
+        content.setObjectName('DialogContent')
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(30, 25, 30, 25)
+        content_layout.setSpacing(16)
+        
+        # App info
+        app_title = QLabel('CodeTrace v1.0')
+        app_title.setStyleSheet('font-size: 20px; font-weight: bold;')
+        content_layout.addWidget(app_title)
+        
+        app_desc = QLabel('Sistema de gestión de códigos de productos.\nPermite organizar, buscar y exportar códigos con sus estados.')
+        app_desc.setWordWrap(True)
+        app_desc.setStyleSheet('font-size: 13px; line-height: 1.4;')
+        content_layout.addWidget(app_desc)
+        
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet('color: rgba(128, 128, 128, 0.3);')
+        content_layout.addWidget(sep)
+        
+        # Help sections
+        help_title = QLabel('Guía Rápida')
+        help_title.setStyleSheet('font-size: 15px; font-weight: bold; margin-top: 5px;')
+        content_layout.addWidget(help_title)
+        
+        help_items = [
+            '• Agregar: Añade nuevos códigos al sistema',
+            '• Editar: Modifica códigos existentes (doble clic)',
+            '• Borrar: Elimina códigos seleccionados',
+            '• Importar: Carga códigos desde archivos CSV/TXT',
+            '• Exportar: Guarda los datos en formato CSV',
+            '• Búsqueda: Filtra por código o descripción',
+            '• Vista Previa: Haz clic en un código para ver su imagen'
+        ]
+        
+        help_text = QLabel('\n'.join(help_items))
+        help_text.setWordWrap(True)
+        help_text.setStyleSheet('font-size: 12px; line-height: 1.5;')
+        content_layout.addWidget(help_text)
+        
+        # Separator
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.HLine)
+        sep2.setStyleSheet('color: rgba(128, 128, 128, 0.3);')
+        content_layout.addWidget(sep2)
+        
+        # Roles info
+        roles_title = QLabel('Roles de Usuario')
+        roles_title.setStyleSheet('font-size: 15px; font-weight: bold; margin-top: 5px;')
+        content_layout.addWidget(roles_title)
+        
+        roles_text = QLabel('• Admin: Acceso completo a todas las funciones\n• Peon: Solo puede visualizar y buscar códigos')
+        roles_text.setStyleSheet('font-size: 12px;')
+        content_layout.addWidget(roles_text)
+        
+        content_layout.addStretch()
+        main_layout.addWidget(content)
+        
+        self.setFixedSize(420, 480)
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.title_bar.geometry().contains(event.pos()):
+            self._old_pos = event.globalPos()
+    
+    def mouseMoveEvent(self, event):
+        if self._old_pos is not None:
+            delta = QPoint(event.globalPos() - self._old_pos)
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self._old_pos = event.globalPos()
+    
+    def mouseReleaseEvent(self, event):
+        self._old_pos = None
+
+
+class DeveloperInfoDialog(QDialog):
+    """Diálogo con información del desarrollador."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setObjectName('CodeDialog')
+        self._old_pos = None
+        
+        # Get icons path
+        import sys
+        import os
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = Path(__file__).parent.parent
+        icons_path = Path(base_path) / 'images' / 'about_dev'
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Title bar
+        self.title_bar = QWidget()
+        self.title_bar.setObjectName('DialogTitleBar')
+        self.title_bar.setFixedHeight(36)
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(8)
+        
+        self.btn_close = QPushButton('×')
+        self.btn_close.setObjectName('DialogCloseButton')
+        self.btn_close.setFixedSize(36, 36)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.clicked.connect(self.reject)
+        title_layout.addWidget(self.btn_close)
+        
+        self.title_label = QLabel('Sobre el Desarrollador')
+        self.title_label.setObjectName('DialogTitleLabel')
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        main_layout.addWidget(self.title_bar)
+        
+        # Content
+        content = QWidget()
+        content.setObjectName('DialogContent')
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(30, 25, 30, 25)
+        content_layout.setSpacing(12)
+        
+        # Developer name
+        dev_name = QLabel('Desarrollado por:')
+        dev_name.setStyleSheet('font-size: 13px; color: gray;')
+        content_layout.addWidget(dev_name)
+        
+        name_label = QLabel('OnelCrack')
+        name_label.setStyleSheet('font-size: 22px; font-weight: bold;')
+        content_layout.addWidget(name_label)
+        
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet('color: rgba(128, 128, 128, 0.3);')
+        content_layout.addWidget(sep)
+        
+        # Contact info with clickable links
+        contact_title = QLabel('Contacto y Redes')
+        contact_title.setStyleSheet('font-size: 15px; font-weight: bold; margin-top: 10px;')
+        content_layout.addWidget(contact_title)
+        
+        # Helper to create link rows with icons
+        def create_link_row(icon_name, display_text, url):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            icon_label = QLabel()
+            icon_file = icons_path / icon_name
+            if icon_file.exists():
+                icon_label.setPixmap(QPixmap(str(icon_file)).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            icon_label.setFixedSize(24, 24)
+            link_label = QLabel(f'<a href="{url}" style="text-decoration: none; color: #0ea5e9;">{display_text}</a>')
+            link_label.setOpenExternalLinks(True)
+            link_label.setCursor(Qt.PointingHandCursor)
+            link_label.setStyleSheet('font-size: 13px;')
+            row.addWidget(icon_label)
+            row.addWidget(link_label)
+            row.addStretch()
+            return row
+        
+        # Email
+        content_layout.addLayout(create_link_row(
+            'email_icon.png',
+            'onelcrackyt@gmail.com',
+            'mailto:onelcrackyt@gmail.com'
+        ))
+        
+        # GitHub
+        content_layout.addLayout(create_link_row(
+            'github_icon.png',
+            'OnelCrack',
+            'https://github.com/OnelCrack'
+        ))
+        
+        # YouTube
+        content_layout.addLayout(create_link_row(
+            'youtube_icon.png',
+            'OnelCrack',
+            'https://www.youtube.com/@OnelCrack'
+        ))
+        
+        # Portfolio/Website
+        content_layout.addLayout(create_link_row(
+            'website_icon.png',
+            'onelcrack.com',
+            'https://onelcrack.com'
+        ))
+        
+        content_layout.addStretch()
+        
+        # Footer
+        footer = QLabel('© 2024 OnelCrack - Todos los derechos reservados')
+        footer.setStyleSheet('font-size: 11px; color: gray; margin-top: 15px;')
+        footer.setAlignment(Qt.AlignCenter)
+        content_layout.addWidget(footer)
+        
+        main_layout.addWidget(content)
+        
+        self.setFixedSize(380, 400)
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.title_bar.geometry().contains(event.pos()):
+            self._old_pos = event.globalPos()
+    
+    def mouseMoveEvent(self, event):
+        if self._old_pos is not None:
+            delta = QPoint(event.globalPos() - self._old_pos)
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self._old_pos = event.globalPos()
+    
+    def mouseReleaseEvent(self, event):
+        self._old_pos = None
+
+
 class CodesTableModel(QAbstractTableModel):
     def __init__(self, repo: CodeRepository) -> None:
         super().__init__()
         self.repo = repo
         self.rows = []
-        self.headers = ['#', 'Código', 'Descripción', 'Fecha', 'Estado']
+        self.headers = ['#', 'Código', 'Descripción', 'Stock', 'Fecha', 'Estado']
         self.annotated_filter = None
         self.search_text = None
         self.status_filter = None
@@ -486,6 +832,40 @@ class CodesTableModel(QAbstractTableModel):
         data = self.repo.list_codes(annotated=self.annotated_filter, duplicates_only=False, search=self.search_text, status=self.status_filter, order_by=self.order_by, order_dir=self.order_dir)
         self.rows = [dict(r) for r in data]
         self.endResetModel()
+    
+    def _format_stock(self, row: dict) -> str:
+        """Formatea el stock como '250(5) - 700(1.7)' donde:
+        - 250 = cantidad por caja
+        - (5) = número de cajas
+        - 700 = cantidad restante
+        - (1.7) = cajas restantes calculadas (restante / por_caja)
+        """
+        per_box = row.get('stock_per_box')
+        boxes = row.get('stock_boxes')
+        remaining = row.get('stock_remaining')
+        
+        if per_box is None or boxes is None:
+            return ''
+        
+        # Total inicial: cantidad por caja * número de cajas
+        total = per_box * boxes
+        
+        # Si no hay remaining, mostrar solo total
+        if remaining is None:
+            return f"{per_box}({boxes}) - {total}({boxes})"
+        
+        # Calcular cajas restantes
+        if per_box > 0:
+            remaining_boxes = remaining / per_box
+            # Formatear con 1 decimal si tiene decimales, sino entero
+            if remaining_boxes == int(remaining_boxes):
+                remaining_boxes_str = str(int(remaining_boxes))
+            else:
+                remaining_boxes_str = f"{remaining_boxes:.1f}"
+        else:
+            remaining_boxes_str = "0"
+        
+        return f"{per_box}({boxes}) - {remaining}({remaining_boxes_str})"
 
     def rowCount(self, parent: QModelIndex=QModelIndex()) -> int:
         return len(self.rows)
@@ -506,22 +886,27 @@ class CodesTableModel(QAbstractTableModel):
             elif col == 2:
                 return row.get('description') or ''
             elif col == 3:
+                return self._format_stock(row)
+            elif col == 4:
                 try:
                     dt = datetime.fromisoformat(row['created_at'])
                     return dt.strftime('%d/%m/%Y %H:%M')
                 except:
                     return row['created_at']
-            elif col == 4:
+            elif col == 5:
                 return ''
-        if role == Qt.UserRole and col == 4:
+        if role == Qt.UserRole and col == 5:
             return row.get('status', STATUS_DISPONIBLE)
         if role == Qt.TextAlignmentRole and col == 0:
+            return Qt.AlignCenter
+        if role == Qt.TextAlignmentRole and col == 3:
             return Qt.AlignCenter
         if role == Qt.ToolTipRole:
             status = row.get('status', STATUS_DISPONIBLE)
             status_label = STATUS_LABELS.get(status, status)
             desc = row.get('description') or 'Sin descripción'
-            return f"Código: {row['code']}\nDescripción: {desc}\nEstado: {status_label}"
+            stock = self._format_stock(row) or 'Sin stock'
+            return f"Código: {row['code']}\nDescripción: {desc}\nStock: {stock}\nEstado: {status_label}"
         return QVariant()
 
     def flags(self, index: QModelIndex):
@@ -549,8 +934,8 @@ class MainWindow(QMainWindow):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint)
         self._old_pos = None
         self.setWindowTitle('CodeTrace - Gestor de Códigos')
-        self.resize(1250, 750)
-        self.setMinimumSize(1050, 700)
+        self.resize(1250, 800)
+        self.setMinimumSize(1250, 790)
         self.main_container = QWidget()
         self.main_container.setObjectName('MainContainer')
         self.setCentralWidget(self.main_container)
@@ -654,15 +1039,58 @@ class MainWindow(QMainWindow):
         self.btn_import = QPushButton('Importar')
         self.btn_import.setIcon(QIcon(f'{actions_path}/import_txt.png'))
         self.btn_import.setIconSize(icon_size)
-        self.btn_import_img = QPushButton('OCR Imagen')
-        self.btn_import_img.setIcon(QIcon(f'{actions_path}/import_image.png'))
-        self.btn_import_img.setIconSize(icon_size)
         self.btn_export_csv = QPushButton('Exportar CSV')
         self.btn_export_csv.setIcon(QIcon(f'{actions_path}/export.png'))
         self.btn_export_csv.setIconSize(icon_size)
-        for btn in [self.btn_add, self.btn_edit, self.btn_delete, self.btn_import, self.btn_import_img, self.btn_export_csv]:
+        for btn in [self.btn_add, self.btn_edit, self.btn_delete, self.btn_import, self.btn_export_csv]:
             toolbar.addWidget(btn)
         toolbar.addStretch()
+        
+        # Circular info buttons
+        self.btn_help = QPushButton('?')
+        self.btn_help.setObjectName('CircularInfoButton')
+        self.btn_help.setFixedSize(32, 32)
+        self.btn_help.setCursor(Qt.PointingHandCursor)
+        self.btn_help.setToolTip('Ayuda e información de la app')
+        self.btn_help.setStyleSheet('''
+            QPushButton#CircularInfoButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #3b82f6, stop:1 #0ea5e9);
+                border: none;
+                border-radius: 16px;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton#CircularInfoButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #60a5fa, stop:1 #38bdf8);
+            }
+        ''')
+        toolbar.addWidget(self.btn_help)
+        
+        self.btn_dev_info = QPushButton('👤')
+        self.btn_dev_info.setObjectName('CircularDevButton')
+        self.btn_dev_info.setFixedSize(32, 32)
+        self.btn_dev_info.setCursor(Qt.PointingHandCursor)
+        self.btn_dev_info.setToolTip('Información del desarrollador')
+        self.btn_dev_info.setStyleSheet('''
+            QPushButton#CircularDevButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #8b5cf6, stop:1 #a855f7);
+                border: none;
+                border-radius: 16px;
+                color: white;
+                font-size: 14px;
+                padding: 0;
+            }
+            QPushButton#CircularDevButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #a78bfa, stop:1 #c084fc);
+            }
+        ''')
+        toolbar.addWidget(self.btn_dev_info)
         # User indicator with logout button
         self.user_indicator = QWidget()
         user_layout = QHBoxLayout(self.user_indicator)
@@ -746,7 +1174,7 @@ class MainWindow(QMainWindow):
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
         self.status_delegate = StatusBadgeDelegate()
-        self.table.setItemDelegateForColumn(4, self.status_delegate)
+        self.table.setItemDelegateForColumn(5, self.status_delegate)
         hh = self.table.horizontalHeader()
         try:
             from PyQt5.QtWidgets import QHeaderView
@@ -754,8 +1182,9 @@ class MainWindow(QMainWindow):
             hh.setSectionResizeMode(0, QHeaderView.Fixed)      # #
             hh.setSectionResizeMode(1, QHeaderView.Fixed)      # Código
             hh.setSectionResizeMode(2, QHeaderView.Stretch)    # Descripción (ocupa el espacio disponible)
-            hh.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Fecha
-            hh.setSectionResizeMode(4, QHeaderView.Fixed)      # Estado
+            hh.setSectionResizeMode(3, QHeaderView.Fixed)      # Stock
+            hh.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Fecha
+            hh.setSectionResizeMode(5, QHeaderView.Fixed)      # Estado
         except Exception:
             pass
         right_panel = QWidget()
@@ -773,17 +1202,10 @@ class MainWindow(QMainWindow):
         # Container for image preview
         self.preview_container = QFrame()
         self.preview_container.setObjectName('PreviewContainer')
-        self.preview_container.setStyleSheet(f"""
-            #PreviewContainer {{
-                background: {COLORS['bg_card']};
-                border: 2px dashed {COLORS['border_dark']};
-                border-radius: 12px;
-                min-height: 180px;
-            }}
-        """)
+        self.preview_container.setMinimumHeight(180)
         preview_layout = QVBoxLayout(self.preview_container)
         preview_layout.setContentsMargins(10, 10, 10, 10)
-        preview_layout.setAlignment(Qt.AlignCenter)
+        preview_layout.setSpacing(0)
         
         # Image label
         self.preview_image = QLabel()
@@ -792,14 +1214,20 @@ class MainWindow(QMainWindow):
         self.preview_image.setMaximumSize(280, 140)
         self.preview_image.setScaledContents(False)
         self._set_preview_placeholder()
-        preview_layout.addWidget(self.preview_image)
+        preview_layout.addWidget(self.preview_image, 0, Qt.AlignHCenter | Qt.AlignTop)
         
-        # Code info label (below image) - white text for dark background
+        # Spacing between image and label
+        preview_layout.addSpacing(10)
+        
+        # Code info label (below image)
         self.preview_code_label = QLabel('')
+        self.preview_code_label.setObjectName('PreviewCodeLabel')
         self.preview_code_label.setAlignment(Qt.AlignCenter)
-        self.preview_code_label.setFixedHeight(24)
-        self.preview_code_label.setStyleSheet('font-weight: bold; font-size: 12px; padding-top: 8px; color: #ffffff;')
-        preview_layout.addWidget(self.preview_code_label)
+        self.preview_code_label.setStyleSheet('font-weight: bold; font-size: 12px;')
+        preview_layout.addWidget(self.preview_code_label, 0, Qt.AlignHCenter)
+        
+        # Spacing before button
+        preview_layout.addSpacing(6)
         
         # Button to add/change image
         self.btn_set_image = QPushButton('Asignar Imagen')
@@ -826,11 +1254,11 @@ class MainWindow(QMainWindow):
         for i, (st, label) in enumerate(STATUS_LABELS.items()):
             color = get_status_color(st)
             stat_label = QLabel(f'{label}: 0')
+            stat_label.setObjectName('StatLabel')
             stat_label.setStyleSheet(f"""
                 color: {color};
                 font-weight: bold;
                 padding: 6px 10px;
-                background: {COLORS['bg_card']};
                 border-radius: 6px;
                 border-left: 3px solid {color};
                 font-size: 11px;
@@ -850,12 +1278,13 @@ class MainWindow(QMainWindow):
         self.sizegrip = QSizeGrip(self)
         self.sizegrip.setFixedSize(16, 16)
         self.btn_import.clicked.connect(self.on_import_file)
-        self.btn_import_img.clicked.connect(self.on_import_img)
         self.btn_export_csv.clicked.connect(self.on_export_csv)
         self.btn_add.clicked.connect(self.on_add)
         self.btn_edit.clicked.connect(self.on_edit)
         self.btn_delete.clicked.connect(self.on_delete)
         self.btn_logout.clicked.connect(self.on_logout)
+        self.btn_help.clicked.connect(self.on_help)
+        self.btn_dev_info.clicked.connect(self.on_dev_info)
         self.theme_toggle.currentTextChanged.connect(self.on_theme_changed)
         self.chk_anotados.stateChanged.connect(self.on_filters_changed)
         self.chk_no_anotados.stateChanged.connect(self.on_filters_changed)
@@ -913,8 +1342,9 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(0, id_width)   # #
         self.table.setColumnWidth(1, 110)        # Código
         # Columna 2 (Descripción) se estira automáticamente
-        # Columna 3 (Fecha) se ajusta al contenido
-        self.table.setColumnWidth(4, 110)        # Estado
+        self.table.setColumnWidth(3, 160)        # Stock
+        # Columna 4 (Fecha) se ajusta al contenido
+        self.table.setColumnWidth(5, 110)        # Estado
 
     def _update_stats(self):
         """Actualiza las estadísticas en el panel lateral."""
@@ -945,25 +1375,24 @@ class MainWindow(QMainWindow):
     def _update_preview(self, row_data: dict):
         """Actualiza la vista previa con los datos de la fila seleccionada."""
         self._selected_code_id = row_data.get('id')
-        code = row_data.get('code', '')
-        image_path = row_data.get('image_path')
+        self._selected_code = row_data.get('code', '')
+        self._selected_image_path = row_data.get('image_path')
         status = row_data.get('status', STATUS_DISPONIBLE)
         status_label = STATUS_LABELS.get(status, status)
         
         # Update code label
-        self.preview_code_label.setText(f'{code} - {status_label}')
-        
-        # Enable button based on role
-        self.btn_set_image.setEnabled(self.user_role == 'admin')
+        self.preview_code_label.setText(f'{self._selected_code} - {status_label}')
         
         # Try to load image
-        if image_path and Path(image_path).exists():
-            pixmap = QPixmap(image_path)
+        if self._selected_image_path and Path(self._selected_image_path).exists():
+            pixmap = QPixmap(self._selected_image_path)
             if not pixmap.isNull():
                 scaled = pixmap.scaled(280, 135, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.preview_image.setPixmap(scaled)
                 self.preview_image.setStyleSheet('')
-                self.btn_set_image.setText('Cambiar Imagen')
+                # Has image: show "Ver Imagen" button for everyone
+                self.btn_set_image.setText('Ver Imagen')
+                self.btn_set_image.setEnabled(True)
                 return
         
         # No image available
@@ -974,7 +1403,9 @@ class MainWindow(QMainWindow):
             font-size: 12px;
             font-style: italic;
         ''')
+        # No image: only admin can assign
         self.btn_set_image.setText('Asignar Imagen')
+        self.btn_set_image.setEnabled(self.user_role == 'admin')
     
     def on_selection_changed(self, selected, deselected):
         """Maneja el cambio de selección en la tabla."""
@@ -988,8 +1419,18 @@ class MainWindow(QMainWindow):
             self._set_preview_placeholder()
     
     def on_set_image(self):
-        """Permite al usuario asignar una imagen al código seleccionado."""
+        """Muestra imagen en popup grande o permite asignar imagen (admin)."""
         if self._selected_code_id is None:
+            return
+        
+        # If image exists, show preview popup
+        if hasattr(self, '_selected_image_path') and self._selected_image_path and Path(self._selected_image_path).exists():
+            dlg = ImagePreviewDialog(self._selected_image_path, self._selected_code, self)
+            dlg.exec_()
+            return
+        
+        # No image - only admin can assign (button should be disabled for peon)
+        if self.user_role != 'admin':
             return
         
         path, _ = QFileDialog.getOpenFileName(
@@ -1061,7 +1502,7 @@ class MainWindow(QMainWindow):
     def _import_csv(self, path: Path) -> list:
         """Importa códigos desde un archivo CSV exportado por CodeTrace.
         Detecta automáticamente el delimitador (coma o punto y coma).
-        Soporta columnas: Código, Descripción, Estado, Usado, Fecha
+        Soporta columnas: Código, Descripción, Stock_Caja, Stock_Cajas, Stock_Restante, Estado, Usado, Imagen, Fecha
         """
         import csv
         items = []
@@ -1106,6 +1547,25 @@ class MainWindow(QMainWindow):
                         desc_idx = i
                         break
                 
+                # Stock columns
+                stock_per_box_idx = None
+                for i, h in enumerate(header_lower):
+                    if 'stock_caja' in h or 'stock_per_box' in h or 'cantidad_caja' in h:
+                        stock_per_box_idx = i
+                        break
+                
+                stock_boxes_idx = None
+                for i, h in enumerate(header_lower):
+                    if 'stock_cajas' in h or 'stock_boxes' in h or 'cajas' in h:
+                        stock_boxes_idx = i
+                        break
+                
+                stock_remaining_idx = None
+                for i, h in enumerate(header_lower):
+                    if 'stock_restante' in h or 'stock_remaining' in h or 'restante' in h:
+                        stock_remaining_idx = i
+                        break
+                
                 status_idx = None
                 for i, h in enumerate(header_lower):
                     if 'estado' in h or 'status' in h:
@@ -1116,6 +1576,13 @@ class MainWindow(QMainWindow):
                 for i, h in enumerate(header_lower):
                     if 'usado' in h or 'editado' in h:
                         usado_idx = i
+                        break
+                
+                # Image column
+                imagen_idx = None
+                for i, h in enumerate(header_lower):
+                    if 'imagen' in h or 'image' in h or 'img' in h or 'image_path' in h:
+                        imagen_idx = i
                         break
                 
                 for row in reader:
@@ -1132,6 +1599,34 @@ class MainWindow(QMainWindow):
                         if desc_text:
                             description = desc_text
                     
+                    # Get stock data
+                    stock_per_box = None
+                    if stock_per_box_idx is not None and len(row) > stock_per_box_idx:
+                        try:
+                            val = row[stock_per_box_idx].strip()
+                            if val:
+                                stock_per_box = int(val)
+                        except ValueError:
+                            pass
+                    
+                    stock_boxes = None
+                    if stock_boxes_idx is not None and len(row) > stock_boxes_idx:
+                        try:
+                            val = row[stock_boxes_idx].strip()
+                            if val:
+                                stock_boxes = int(val)
+                        except ValueError:
+                            pass
+                    
+                    stock_remaining = None
+                    if stock_remaining_idx is not None and len(row) > stock_remaining_idx:
+                        try:
+                            val = row[stock_remaining_idx].strip()
+                            if val:
+                                stock_remaining = int(val)
+                        except ValueError:
+                            pass
+                    
                     # Get status
                     status_text = row[status_idx].strip().lower() if status_idx is not None and len(row) > status_idx else ''
                     status = label_to_status.get(status_text, STATUS_DISPONIBLE)
@@ -1142,52 +1637,33 @@ class MainWindow(QMainWindow):
                         usado_text = row[usado_idx].strip().lower()
                         editado = usado_text in ['sí', 'si', 'yes', '1', 'true']
                     
-                    # Tuple: (code, annotated, created_at, status, image_path, description)
-                    items.append((code, editado, datetime.utcnow(), status, None, description))
+                    # Get image_path
+                    image_path = None
+                    if imagen_idx is not None and len(row) > imagen_idx:
+                        img_text = row[imagen_idx].strip()
+                        if img_text and Path(img_text).exists():
+                            image_path = img_text
+                    
+                    # Tuple: (code, annotated, created_at, status, image_path, description, stock_per_box, stock_boxes, stock_remaining)
+                    items.append((code, editado, datetime.utcnow(), status, image_path, description, stock_per_box, stock_boxes, stock_remaining))
         except Exception as e:
             QMessageBox.warning(self, 'Error CSV', f'Error al leer CSV: {e}')
             return []
         return items
 
-    def on_import_img(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, 'Seleccionar imágenes', '', 'Images (*.png *.jpg *.jpeg)')
-        if not paths:
-            return None
-        total = 0
-        all_duplicates = []
-        for path in paths:
-            p = Path(path)
-            try:
-                raw_items = extract_codes_from_image(p)
-                items = [(code, ann, dt, STATUS_DISPONIBLE) for code, ann, dt in raw_items]
-            except Exception as e:
-                QMessageBox.critical(self, 'Error OCR', f'Error en OCR: {e}')
-                continue
-            if items:
-                codes_to_import = [item[0] for item in items]
-                existing = self.repo.codes_exist(codes_to_import)
-                if existing:
-                    all_duplicates.extend(existing)
-                    items = [item for item in items if item[0] not in existing]
-                if items:
-                    self.repo.add_codes(items)
-                    total += len(items)
-        self.table_model.load()
-        self._update_column_widths()
-        self._update_stats()
-        if all_duplicates:
-            dup_list = ', '.join(all_duplicates[:10])
-            if len(all_duplicates) > 10:
-                dup_list += f'... y {len(all_duplicates) - 10} más'
-            QMessageBox.warning(self, 'Códigos duplicados', f'Los siguientes códigos ya existían y no se importaron:\n\n{dup_list}')
-        if total > 0:
-            QMessageBox.information(self, 'OCR exitoso', f'Importados {total} códigos desde imágenes.')
-        elif not all_duplicates:
-            QMessageBox.information(self, 'OCR sin resultados', 'No se detectaron códigos válidos.')
-
     def on_export_csv(self) -> None:
         """Exporta los datos actuales de la tabla a CSV."""
         export_to_csv(self, self.table_model.rows, STATUS_LABELS)
+
+    def on_help(self) -> None:
+        """Muestra el diálogo de ayuda e información de la app."""
+        dlg = HelpDialog(self)
+        dlg.exec_()
+    
+    def on_dev_info(self) -> None:
+        """Muestra el diálogo de información del desarrollador."""
+        dlg = DeveloperInfoDialog(self)
+        dlg.exec_()
 
     def _apply_role_permissions(self) -> None:
         """Aplica permisos según el rol del usuario."""
@@ -1197,7 +1673,6 @@ class MainWindow(QMainWindow):
             self.btn_edit.setEnabled(False)
             self.btn_delete.setEnabled(False)
             self.btn_import.setEnabled(False)
-            self.btn_import_img.setEnabled(False)
             self.btn_export_csv.setEnabled(False)
             # Disable double-click edit for peon
             try:
@@ -1210,7 +1685,6 @@ class MainWindow(QMainWindow):
             self.btn_edit.setEnabled(True)
             self.btn_delete.setEnabled(True)
             self.btn_import.setEnabled(True)
-            self.btn_import_img.setEnabled(True)
             self.btn_export_csv.setEnabled(True)
             # Enable double-click edit for admin
             try:
