@@ -1147,7 +1147,11 @@ class MainWindow(QMainWindow):
         self.btn_export_csv = QPushButton('Exportar CSV')
         self.btn_export_csv.setIcon(QIcon(f'{actions_path}/export.png'))
         self.btn_export_csv.setIconSize(icon_size)
-        for btn in [self.btn_add, self.btn_edit, self.btn_delete, self.btn_import, self.btn_export_csv]:
+        self.btn_refresh = QPushButton('Actualizar')
+        self.btn_refresh.setIcon(QIcon(f'{actions_path}/refresh.png'))
+        self.btn_refresh.setIconSize(icon_size)
+        self.btn_refresh.setToolTip('Recargar datos y recalcular estados según stock')
+        for btn in [self.btn_add, self.btn_edit, self.btn_delete, self.btn_import, self.btn_export_csv, self.btn_refresh]:
             toolbar.addWidget(btn)
         toolbar.addStretch()
         
@@ -1388,6 +1392,7 @@ class MainWindow(QMainWindow):
         self.sizegrip.setFixedSize(16, 16)
         self.btn_import.clicked.connect(self.on_import_file)
         self.btn_export_csv.clicked.connect(self.on_export_csv)
+        self.btn_refresh.clicked.connect(self.on_refresh)
         self.btn_add.clicked.connect(self.on_add)
         self.btn_edit.clicked.connect(self.on_edit)
         self.btn_delete.clicked.connect(self.on_delete)
@@ -1464,6 +1469,33 @@ class MainWindow(QMainWindow):
             color = get_status_color(st)
             self.stats_widgets[st].setText(f'{label}: {count}')
         self.stats_label.setText(f"Total: {total} códigos  |  Editados: {stats.get('annotated', 0)}")
+    
+    def on_refresh(self):
+        """Recarga la base de datos y recalcula estados según stock."""
+        # Recalcular todos los estados basados en stock
+        updated = self.repo.recalculate_all_statuses()
+        
+        # Recargar la tabla
+        self.table_model.load()
+        self._update_column_widths()
+        self._update_stats()
+        
+        # Limpiar selección y preview
+        self._set_preview_placeholder()
+        
+        # Mostrar mensaje si se actualizaron estados
+        if updated > 0:
+            QMessageBox.information(
+                self, 
+                'Actualización completada', 
+                f'Se actualizaron {updated} estados según el stock actual.'
+            )
+        else:
+            QMessageBox.information(
+                self, 
+                'Actualización completada', 
+                'Datos recargados. No hubo cambios de estado.'
+            )
     
     def _set_preview_placeholder(self):
         """Muestra el placeholder cuando no hay imagen."""

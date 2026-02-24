@@ -16,4 +16,4 @@ installer/
 *.bak
 *.tmp
 saved/
-.db
+*.db

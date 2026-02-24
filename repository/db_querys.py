@@ -20,7 +20,7 @@ def calculate_status_from_stock(stock_per_box: Optional[int], stock_boxes: Optio
     """Calcula el estado automático basándose en los niveles de stock.
     
     Reglas:
-    - remaining < 0: STATUS_NO_HAY_MAS (sin stock)
+    - remaining <= 0: STATUS_NO_HAY_MAS (sin stock o agotado)
     - remaining < per_box AND remaining > 0: STATUS_ULTIMO (últimos productos)
     - remaining >= per_box AND remaining >= 1.25 * per_box: STATUS_DISPONIBLE (en stock)
     
@@ -32,8 +32,8 @@ def calculate_status_from_stock(stock_per_box: Optional[int], stock_boxes: Optio
     if stock_per_box <= 0:
         return None
     
-    # Stock negativo -> No hay más (SIEMPRE aplica, incluso si está editado)
-    if stock_remaining < 0:
+    # Stock cero o negativo -> No hay más (SIEMPRE aplica, incluso si está editado)
+    if stock_remaining <= 0:
         return STATUS_NO_HAY_MAS
     
     # Menos de una caja completa pero mayor a 0 -> Último
