@@ -177,7 +177,7 @@ class VentasWindow(QWidget):
     
     def init_ui(self):
         self.setWindowTitle('💰 Simulador de Ventas - CodeTrace')
-        self.setFixedSize(500, 650)
+        self.setFixedSize(500, 750)
         self.setObjectName('MainWindow')
         
         layout = QVBoxLayout(self)

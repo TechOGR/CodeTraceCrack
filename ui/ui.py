@@ -41,21 +41,29 @@ class StatusBadgeDelegate(QStyledItemDelegate):
 
 
 class StockDelegate(QStyledItemDelegate):
-    """Delegate para mostrar el stock con colores: azul para total, verde/rojo para restante."""
+    """Delegate para mostrar el stock con formato visual completo.
+    
+    Formato: "X×Y (Z) • Quedan: W (V)"
+    Donde:
+    - X = unidades por caja
+    - Y = número de cajas
+    - Z = total de cajas
+    - W = unidades restantes  
+    - V = cajas restantes
+    """
     
     # Colores
-    COLOR_TOTAL = "#3b82f6"      # Azul para cantidad total (cajas)
+    COLOR_PER_BOX = "#3b82f6"        # Azul para cantidad por caja
+    COLOR_BOXES = "#8b5cf6"          # Violeta para número de cajas
     COLOR_REMAINING_OK = "#22c55e"   # Verde para stock bueno (>30%)
     COLOR_REMAINING_LOW = "#f59e0b"  # Naranja para stock bajo (10-30%)
     COLOR_REMAINING_CRITICAL = "#ef4444"  # Rojo para stock crítico (<10%)
-    COLOR_SEPARATOR = "#64748b"  # Gris para el separador
+    COLOR_LABEL = "#94a3b8"          # Gris para etiquetas/separadores
     
     def paint(self, painter: QPainter, option, index: QModelIndex):
-        # Obtener datos de stock del UserRole
-        stock_data = index.data(Qt.UserRole + 1)  # Usamos UserRole+1 para stock
+        stock_data = index.data(Qt.UserRole + 1)
         
         if not stock_data:
-            # Si no hay datos, dibujar normalmente
             super().paint(painter, option, index)
             return
         
@@ -68,7 +76,7 @@ class StockDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # Calcular el total y cajas restantes
+        # Calcular valores
         total = per_box * boxes
         if remaining is None:
             remaining = total
@@ -81,9 +89,8 @@ class StockDelegate(QStyledItemDelegate):
                 remaining_boxes_str = f"{remaining_boxes:.1f}"
         else:
             remaining_boxes_str = "0"
-            remaining_boxes = 0
         
-        # Determinar color del restante según porcentaje
+        # Color según porcentaje de stock
         if total > 0:
             percentage = (remaining / total) * 100
             if percentage > 30:
@@ -93,47 +100,99 @@ class StockDelegate(QStyledItemDelegate):
             else:
                 remaining_color = self.COLOR_REMAINING_CRITICAL
         else:
-            remaining_color = self.COLOR_REMAINING_OK
+            remaining_color = self.COLOR_REMAINING_CRITICAL
         
-        # Preparar textos
-        total_text = f"{per_box}({boxes})"
-        remaining_text = f"{remaining}({remaining_boxes_str})"
-        separator = " | "
-        
-        # Configurar fuente
-        font = QFont()
-        font.setBold(True)
-        font.setPointSize(9)
-        painter.setFont(font)
-        
-        # Calcular anchos de texto
-        fm = painter.fontMetrics()
-        total_width = fm.horizontalAdvance(total_text)
-        sep_width = fm.horizontalAdvance(separator)
-        remaining_width = fm.horizontalAdvance(remaining_text)
-        full_width = total_width + sep_width + remaining_width
-        
-        # Posición centrada
         rect = option.rect
-        start_x = rect.x() + (rect.width() - full_width) // 2
-        y = rect.y() + (rect.height() + fm.ascent() - fm.descent()) // 2
         
-        # Dibujar texto del total (azul)
-        painter.setPen(QPen(QColor(self.COLOR_TOTAL)))
-        painter.drawText(start_x, y, total_text)
+        # Fuentes
+        font_normal = QFont()
+        font_normal.setPointSize(9)
         
-        # Dibujar separador (gris)
-        painter.setPen(QPen(QColor(self.COLOR_SEPARATOR)))
-        painter.drawText(start_x + total_width, y, separator)
+        font_bold = QFont()
+        font_bold.setBold(True)
+        font_bold.setPointSize(9)
         
-        # Dibujar texto restante (color según porcentaje)
+        # === FORMATO: "120×5 • Quedan: 58 (0.5)" ===
+        
+        # Parte 1: Info de cajas (por_caja × num_cajas )
+        part1_per_box = f"{per_box}"      # cantidad por caja
+        part1_times = "×"                  # multiplicador
+        part1_boxes = f"{boxes}"           # número de cajas
+        part1_label = ""                 # etiqueta
+        
+        # Separador
+        separator = "  •  "
+        
+        # Parte 2: Stock restante
+        part2_remaining = f"{remaining}"   # unidades que quedan
+        part2_boxes = f"({remaining_boxes_str})"  # cajas equivalentes
+        
+        # Calcular anchos
+        painter.setFont(font_bold)
+        fm_bold = painter.fontMetrics()
+        w_per_box = fm_bold.horizontalAdvance(part1_per_box)
+        w_boxes = fm_bold.horizontalAdvance(part1_boxes)
+        w_remaining = fm_bold.horizontalAdvance(part2_remaining)
+        
+        painter.setFont(font_normal)
+        fm_normal = painter.fontMetrics()
+        w_times = fm_normal.horizontalAdvance(part1_times)
+        w_label = fm_normal.horizontalAdvance(part1_label)
+        w_sep = fm_normal.horizontalAdvance(separator)
+        w_boxes_label = fm_normal.horizontalAdvance(part2_boxes)
+        
+        full_width = w_per_box + w_times + w_boxes + w_label + w_sep + w_remaining + 4 + w_boxes_label
+        
+        # Posición alineada a la izquierda con padding
+        start_x = rect.x() + 10
+        y = rect.y() + (rect.height() + fm_bold.ascent() - fm_bold.descent()) // 2
+        
+        current_x = start_x
+        
+        # --- Dibujar Parte 1: Info de cajas ---
+        # Cantidad por caja (azul, bold)
+        painter.setFont(font_bold)
+        painter.setPen(QPen(QColor(self.COLOR_PER_BOX)))
+        painter.drawText(current_x, y, part1_per_box)
+        current_x += w_per_box
+        
+        # Símbolo × (gris)
+        painter.setFont(font_normal)
+        painter.setPen(QPen(QColor(self.COLOR_LABEL)))
+        painter.drawText(current_x, y, part1_times)
+        current_x += w_times
+        
+        # Número de cajas (violeta, bold)
+        painter.setFont(font_bold)
+        painter.setPen(QPen(QColor(self.COLOR_BOXES)))
+        painter.drawText(current_x, y, part1_boxes)
+        current_x += w_boxes
+        
+        # "" (gris)
+        painter.setFont(font_normal)
+        painter.setPen(QPen(QColor(self.COLOR_LABEL)))
+        painter.drawText(current_x, y, part1_label)
+        current_x += w_label
+        
+        # --- Separador ---
+        painter.drawText(current_x, y, separator)
+        current_x += w_sep
+        
+        # --- Dibujar Parte 2: Stock restante ---
+        # Unidades restantes (color según nivel, bold)
+        painter.setFont(font_bold)
         painter.setPen(QPen(QColor(remaining_color)))
-        painter.drawText(start_x + total_width + sep_width, y, remaining_text)
+        painter.drawText(current_x, y, part2_remaining)
+        current_x += w_remaining + 4
+        
+        # Cajas equivalentes (mismo color, normal)
+        painter.setFont(font_normal)
+        painter.drawText(current_x, y, part2_boxes)
         
         painter.restore()
     
     def sizeHint(self, option, index):
-        return QSize(160, option.rect.height())
+        return QSize(220, option.rect.height())
 
 
 class AutocompleteSearchEdit(QLineEdit):
@@ -714,6 +773,7 @@ class HelpDialog(QDialog):
             '• Borrar: Elimina códigos seleccionados',
             '• Importar: Carga códigos desde archivos CSV/TXT',
             '• Exportar: Guarda los datos en formato CSV',
+            '• Actualizar: Recarga datos y recalcula estados según stock',
             '• Búsqueda: Filtra por código o descripción',
             '• Vista Previa: Haz clic en un código para ver su imagen'
         ]
@@ -734,14 +794,36 @@ class HelpDialog(QDialog):
         roles_title.setStyleSheet('font-size: 15px; font-weight: bold; margin-top: 5px;')
         content_layout.addWidget(roles_title)
         
-        roles_text = QLabel('• Admin: Acceso completo a todas las funciones\n• user: Solo puede visualizar y buscar códigos')
+        roles_text = QLabel('• Admin: Acceso completo a todas las funciones\n• Peon: Solo puede visualizar, buscar y actualizar')
         roles_text.setStyleSheet('font-size: 12px;')
         content_layout.addWidget(roles_text)
+        
+        # Separator
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.HLine)
+        sep3.setStyleSheet('color: rgba(128, 128, 128, 0.3);')
+        content_layout.addWidget(sep3)
+        
+        # Stock info
+        stock_title = QLabel('Estados Automáticos')
+        stock_title.setStyleSheet('font-size: 15px; font-weight: bold; margin-top: 5px;')
+        content_layout.addWidget(stock_title)
+        
+        stock_info = QLabel(
+            '• Disponible: Stock ≥ 1.25 cajas\n'
+            '• Último: Stock < 1 caja (pero > 0)\n'
+            '• No hay más: Stock = 0 o negativo'
+        )
+        stock_info.setStyleSheet('font-size: 12px;')
+        content_layout.addWidget(stock_info)
         
         content_layout.addStretch()
         main_layout.addWidget(content)
         
-        self.setFixedSize(420, 480)
+        # Usar tamaño fijo en ancho pero flexible en alto para evitar conflictos con Windows
+        self.setFixedWidth(420)
+        self.setMinimumHeight(560)
+        self.adjustSize()
     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -889,7 +971,10 @@ class DeveloperInfoDialog(QDialog):
         
         main_layout.addWidget(content)
         
-        self.setFixedSize(380, 400)
+        # Usar tamaño fijo en ancho pero flexible en alto para evitar conflictos con Windows
+        self.setFixedWidth(380)
+        self.setMinimumHeight(400)
+        self.adjustSize()
     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -1456,7 +1541,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(0, id_width)   # #
         self.table.setColumnWidth(1, 110)        # Código
         # Columna 2 (Descripción) se estira automáticamente
-        self.table.setColumnWidth(3, 160)        # Stock
+        self.table.setColumnWidth(3, 210)        # Stock (formato: 120×5 • 58 (0.5))
         # Columna 4 (Fecha) se ajusta al contenido
         self.table.setColumnWidth(5, 110)        # Estado
 
